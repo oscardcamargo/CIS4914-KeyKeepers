@@ -2,7 +2,10 @@ module KeyKeeper
 
 go 1.23
 
-require github.com/asynkron/protoactor-go v0.0.0-20240822202345-3c0e61ca19c9
+require (
+	github.com/asynkron/protoactor-go v0.0.0-20240822202345-3c0e61ca19c9
+	google.golang.org/protobuf v1.36.5
+)
 
 require (
 	github.com/Workiva/go-datastructures v1.1.3 // indirect
@@ -13,7 +16,7 @@ require (
 	github.com/go-logr/logr v1.3.0 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/golang/protobuf v1.5.3 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/uuid v1.5.0 // indirect
 	github.com/lithammer/shortuuid/v4 v4.0.0 // indirect
 	github.com/lmittmann/tint v1.0.3 // indirect
@@ -36,5 +39,4 @@ require (
 	golang.org/x/text v0.14.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231002182017-d307bd883b97 // indirect
 	google.golang.org/grpc v1.60.1 // indirect
-	google.golang.org/protobuf v1.33.0 // indirect
 )
