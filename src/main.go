@@ -21,7 +21,7 @@ func main() {
 		port, _ = strconv.Atoi(os.Args[2])
 	}
 
-	//Create the actor system for this one node and set up the remote networking bits
+	//Create the actor system for this one node and set up the remote networking
 	system := actor.NewActorSystem()
 	network := remote.NewRemote(system, remote.Configure(hostname, port))
 	network.Start()
@@ -33,8 +33,7 @@ func main() {
 		fmt.Printf("[Actor spawn failed]: %v\n", err)
 	}
 
-	system.Root.Send(node_pid, &InitializeFromSystem{actorPID: node_pid})
-	system.Root.Send(node_pid, &Message{text: "Welcome to the actor network!"})
+	system.Root.Send(node_pid, &Message{Text: "Welcome to the actor network!"})
 
 	fmt.Println(node_pid)
 
@@ -46,7 +45,8 @@ func main() {
 		fmt.Printf("Looks like you want to connect to [%v] a.k.a [%v].\n", remote_address, remote_name)
 		remote_PID := actor.NewPID(remote_address, remote_name)
 
-		system.Root.Send(remote_PID, &Message{text: "Hello from another node!"})
+		txt := fmt.Sprintf("Hello from node [%v] a.k.a [%v]", remote_address, remote_name)
+		system.Root.Send(remote_PID, &Message{Text: txt})
 	}
 
 	//used to keep the application running

@@ -1,0 +1,9 @@
+How to set up Protobuf:
+
+1. Download appropriate Protoc binary from releases page
+2. Extract the folder somewhere and put the folder with the .exe in your PATH
+3. Install the Protoc Go Plugin
+    - go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+4. Make your message.proto file with message declarations
+5. Generate the Go file for message definitions
+    - protoc --go_out=. --go_opt=paths=source_relative message.proto
