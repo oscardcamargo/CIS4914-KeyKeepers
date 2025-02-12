@@ -1,2 +1,4 @@
 github.com/asynkron/protoactor-go v0.0.0-20240822202345-3c0e61ca19c9 h1:mFWX0/oYqQ4Z+er0U56vA+ZPisr3kaYs1QsQetAVs6E=
 github.com/asynkron/protoactor-go v0.0.0-20240822202345-3c0e61ca19c9/go.mod h1:HTx47MGokOrouz8nrUmjyLLOVu+/kRNN6KKVG0XjQ3E=
+github.com/mattn/go-sqlite3 v1.14.24 h1:tpSp2G2KyMnnQu99ngJ47EIkWVmliIizyZBfPrBWDRM=
+github.com/mattn/go-sqlite3 v1.14.24/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
