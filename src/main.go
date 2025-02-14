@@ -49,8 +49,10 @@ func main() {
 		//send node2 a join message, passing node1's information
 		//node2 will call its join() function upon receiption of this message
 		system.Root.Send(node_pid, &Join{Address: remote_address, Name: remote_name})
-	}
 
+		select {}
+	}
+	system.Root.Send(node_pid, &FirstNode{})
 	//used to keep the application running
 	//TODO: make a more graceful way of keeping it up and shutting it down
 	select {}
