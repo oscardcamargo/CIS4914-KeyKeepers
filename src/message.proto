@@ -6,3 +6,18 @@ option go_package = ".;main";
 message Message {
     string text = 1;
 }
+
+message Join {
+    string address = 1;
+    string name = 2;
+}
+
+message FindSuccessor {
+    string address = 1;
+    string name = 2;
+}
+
+message Initialize {
+    string address = 1;
+    string name = 2;
+}

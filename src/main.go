@@ -12,7 +12,7 @@ func main() {
 	var hostname string
 	var port int
 
-	// go run node.go main.go <hostname> <port> <name> <remote_hostname> <remote_port> <remote_name>
+	// go run . <hostname> <port> <name> <remote_hostname> <remote_port> <remote_name>
 	if len(os.Args) < 4 {
 		fmt.Println("Bad command line arguments")
 		return
@@ -21,32 +21,34 @@ func main() {
 		port, _ = strconv.Atoi(os.Args[2])
 	}
 
-	//Create the actor system for this one node and set up the remote networking
+	//Create the actor system on this network.
 	system := actor.NewActorSystem()
-	network := remote.NewRemote(system, remote.Configure(hostname, port))
-	network.Start()
+	server := remote.NewRemote(system, remote.Configure(hostname, port))
+	server.Start()
 
-	props := actor.PropsFromProducer(func() actor.Actor { return makeNode(hostname, port)} )
+	//Spawn the first node
+	props := actor.PropsFromProducer(func() actor.Actor { return &NodeActor{} })
 	node_name := os.Args[3]
 	node_pid, err := system.Root.SpawnNamed(props, node_name)
 	if err != nil {
 		fmt.Printf("[Actor spawn failed]: %v\n", err)
 	}
+	//fmt.Println(node_pid.GetAddress(), node_pid.GetId())
+	system.Root.Send(node_pid, &Initialize{Address: node_pid.GetAddress(), Name: node_pid.GetId()})
 
-	system.Root.Send(node_pid, &Message{Text: "Welcome to the actor network!"})
-
-	fmt.Println(node_pid)
-
-	//this means you started the process with the intent of joining an existing node
+	//This means an existing Chord node was provided
+	// [node2] --(connect)--> [node1]
 	if len(os.Args) == 7 {
-		remote_address := fmt.Sprintf("%s:%s", os.Args[4], os.Args[5])
+		var remote_hostname = os.Args[4]
+		if remote_hostname == "localhost" {
+			remote_hostname = "127.0.0.1"
+		}
+		remote_address := fmt.Sprintf("%s:%s", remote_hostname, os.Args[5])
 		remote_name := os.Args[6]
 
-		fmt.Printf("Looks like you want to connect to [%v] a.k.a [%v].\n", remote_address, remote_name)
-		remote_PID := actor.NewPID(remote_address, remote_name)
-
-		txt := fmt.Sprintf("Hello from node [%v] a.k.a [%v]", remote_address, remote_name)
-		system.Root.Send(remote_PID, &Message{Text: txt})
+		//send node2 a join message, passing node1's information
+		//node2 will call its join() function upon receiption of this message
+		system.Root.Send(node_pid, &Join{Address: remote_address, Name: remote_name})
 	}
 
 	//used to keep the application running
