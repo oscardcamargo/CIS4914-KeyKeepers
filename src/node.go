@@ -14,6 +14,7 @@ type NodeInfo struct {
 	pid *actor.PID
 	nodeID uint64
 	address string
+	name string
 }
 
 type NodeActor struct {
@@ -33,39 +34,69 @@ func (state *NodeActor) Receive(context actor.Context) {
 		case *Message:
 			fmt.Printf("\nGot a message: %v\n", msg.Text)
 		case *Initialize:
-			state.address = msg.GetAddress()
-			state.name = msg.GetName()
-			state.nodeID = consistent_hash(msg.GetAddress())
-			state.data = make(map[string]string)
-			state.selfPID = actor.NewPID(msg.GetAddress(), msg.GetName())
-			state.successor = nil
-			state.predecessor = nil
+			state.initialize(msg.GetAddress(), msg.GetName())
+		case *FirstNode:
+			state.successor = &NodeInfo{
+				address: state.address,
+				name: state.name,
+			}
+			state.predecessor = state.successor
+			fmt.Println("I AM THE FIRST NODE!!!!")
 		case *Join:
 			target_PID := actor.NewPID(msg.GetAddress(), msg.GetName())
 			state.join(target_PID, context)
 		case *FindSuccessor:
 			//target_PID := actor.NewPID(msg.GetAddress(), msg.GetName())
 			nodeInfo := state.find_successor(consistent_hash(msg.GetAddress()), context)
-
-			context.Respond(&Message{Text: nodeInfo.address})
+			context.Respond(&NodeInfoMsg{Address: nodeInfo.address, Name: nodeInfo.name})
+			fmt.Println("Responded to FindSuccessor back with node ", nodeInfo.address)
 	}
 }
 
-func (state *NodeActor) join(node *actor.PID, context actor.Context) {
-	//get
-	fmt.Println("IN JOIN")
+func (state *NodeActor) initialize(address string, name string) {
+	state.address = address
+	state.name = name
+	state.nodeID = consistent_hash(address)
+	state.data = make(map[string]string)
+	state.selfPID = actor.NewPID(address, name)
+	state.successor = nil
 	state.predecessor = nil
+}
+
+// node attempting to join the ring calls this
+func (state *NodeActor) join(node *actor.PID, context actor.Context) {
+	//set predecessor to nil
+	state.predecessor = nil
+
+	//call find successor on the node your joining, passing yourself in
 	future := context.RequestFuture(node, &FindSuccessor{Address: state.address, Name: state.name}, 1*time.Second)
 	result, err := future.Result()
 	if err != nil {
 		fmt.Printf("\n[Something went horribly wrong]: %v\n", err)
 	}
-	fmt.Println("some results: ", result)
+
+	//response result expects to be a NodeInfoMsg
+	response, ok := result.(*NodeInfoMsg)
+	if !ok {
+		fmt.Printf("Expected a NodeInfoMsg message: %v", ok)
+	}
+	
+	state.successor = &NodeInfo{
+		address: response.GetAddress(),
+		name: response.GetName(),
+	}
 }
 
 //accepts 64-bit id hash to identify node
 func (state *NodeActor) find_successor(id uint64, context actor.Context) *NodeInfo {
 	//finding successor of provided id
+	fmt.Printf("Attempting to find successor of %v\n", id)
+
+	//dealing with the first node in the ring
+	if state.predecessor == state.successor {
+		return state.successor
+	}
+
 	if (state.nodeID < id) && (id < state.successor.nodeID) {
 		return state.successor
 	} else {
