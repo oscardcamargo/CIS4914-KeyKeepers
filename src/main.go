@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 func main() {
@@ -26,34 +27,37 @@ func main() {
 	server := remote.NewRemote(system, remote.Configure(hostname, port))
 	server.Start()
 
-	//Spawn the first node
+	//Spawn the node
 	props := actor.PropsFromProducer(func() actor.Actor { return &NodeActor{} })
 	node_name := os.Args[3]
 	node_pid, err := system.Root.SpawnNamed(props, node_name)
 	if err != nil {
 		fmt.Printf("[Actor spawn failed]: %v\n", err)
 	}
-	//fmt.Println(node_pid.GetAddress(), node_pid.GetId())
-	system.Root.Send(node_pid, &Initialize{Address: node_pid.GetAddress(), Name: node_pid.GetId()})
+	
 
-	//This means an existing Chord node was provided
-	// [node2] --(connect)--> [node1]
+	//These parameters will change if a bootstrap node was provided
+	var remote_address string = ""
+	var remote_name string = ""
 	if len(os.Args) == 7 {
-		var remote_hostname = os.Args[4]
+
+		remote_hostname := os.Args[4]
 		if remote_hostname == "localhost" {
 			remote_hostname = "127.0.0.1"
 		}
-		remote_address := fmt.Sprintf("%s:%s", remote_hostname, os.Args[5])
-		remote_name := os.Args[6]
 
-		//send node2 a join message, passing node1's information
-		//node2 will call its join() function upon receiption of this message
-		system.Root.Send(node_pid, &Join{Address: remote_address, Name: remote_name})
-
-		select {}
+		remote_address = fmt.Sprintf("%s:%s", remote_hostname, os.Args[5])
+		remote_name = os.Args[6]
 	}
-	system.Root.Send(node_pid, &FirstNode{})
+
+	//Send the initialization message with the data required to set up the node properties
+	system.Root.Send(node_pid, &Initialize{Address: node_pid.GetAddress(), Name: node_pid.GetId(), RemoteAddress: remote_address, RemoteName: remote_name})
+	//time.Sleep(2*time.Second)
+
 	//used to keep the application running
 	//TODO: make a more graceful way of keeping it up and shutting it down
-	select {}
+	for {
+		time.Sleep(5*time.Second)
+		system.Root.Send(node_pid, &StabilizeSelf{})
+	}
 }
