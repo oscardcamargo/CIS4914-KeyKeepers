@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package main;
+option go_package = ".;main";
+
+message Join {
+    string address = 1;
+    string name = 2;
+}
+
+message Initialize {
+    string address = 1;
+    string name = 2;
+
+    string remoteAddress = 3;
+    string remoteName = 4;
+}
+
+message StabilizeSelf {
+
+}
+
+message Notify {
+    string address = 1;
+    string name = 2;
+}
+
+message NodeInfoMsg {
+    uint64 nodeID = 1; 
+    string address = 2;
+    string name = 3;
+}
+
+message RequestSuccessor {
+    string address = 1;
+    string name = 2;
+}
+
+message RequestPredecessor {
+}
