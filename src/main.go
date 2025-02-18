@@ -10,9 +10,13 @@ import (
 )
 
 func main() {
+  var testHash string = `4c3f9505b832a5a8bb22d5d339b1dfd4800d96d3ffec4a495fdc2274efa6601c`
+	var hashResult = checkHash(testHash)
+
+	fmt.Println(hashResult)
+  
 	var hostname string
 	var port int
-
 	// go run . <hostname> <port> <name> <remote_hostname> <remote_port> <remote_name>
 	if len(os.Args) < 4 {
 		fmt.Println("Bad command line arguments")
