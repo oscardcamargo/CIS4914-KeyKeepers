@@ -2,6 +2,7 @@ module KeyKeeper
 
 go 1.23
 
+
 require (
 	github.com/asynkron/protoactor-go v0.0.0-20240822202345-3c0e61ca19c9
 	google.golang.org/protobuf v1.36.5
@@ -40,3 +41,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231002182017-d307bd883b97 // indirect
 	google.golang.org/grpc v1.60.1 // indirect
 )
+
+require github.com/mattn/go-sqlite3 v1.14.24 // indirect
