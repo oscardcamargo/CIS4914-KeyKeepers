@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"time"
-
 	"github.com/asynkron/protoactor-go/actor"
 )
 
@@ -132,6 +131,7 @@ func (state *NodeActor) join(node *actor.PID, context actor.Context) {
 		name: successor_info.GetName(),
 	}
 
+	state.fingerTable[1] = state.successor
 	fmt.Printf("\t->[join]: Got a successor for [%v], its: %v\n", state.name, state.successor.name)
 	fmt.Printf("\t->[join]: Succesfully joined the ring. Precessor is set to [nil]. Successor has been set to [%v]\n", state.successor.name)
 }
@@ -139,23 +139,44 @@ func (state *NodeActor) join(node *actor.PID, context actor.Context) {
 func (state *NodeActor) stabilize(context actor.Context) {
 	//we need to get the predecessor of this node's successor
 	//must be done with message passing
-	//CANNOT use future requests here because there is a chance you will send a message to yourself
-	//causing you to deadlock yourself before you can respond in time...
-	
-	future := context.RequestFuture(state.successor.pid, &RequestPredecessor{}, 1*time.Second)
-	result, err := future.Result()
-	if err != nil {
-		fmt.Printf("\t->[stabilize ERROR]: %v\n", err)
-		return
-	}
-	//response result expects to be a NodeInfoMsg
-	//now we have the sucessor's predecessor.
-	predecessor_info, ok := result.(*NodeInfoMsg)
-	if !ok {
-		fmt.Printf("\t->[stabilize ERROR]: expected a NodeInfoMsg message: %v\n", ok)
-		return
-	}
+	var predecessor_info *NodeInfoMsg
 
+	//We need to check if youre sending a message to yourself and handle it differently
+	//Otherwise the node will deadlock itself with RequestFuture()... is there another way?
+	if state.successor.pid.String() == state.selfPID.String() {
+		fmt.Println("\t->[stabilize]: You played yourself...")
+		var pred_id uint64
+		var pred_addr, pred_name string
+		if state.predecessor == nil {
+			pred_id = state.nodeID
+			pred_addr = state.address
+			pred_name = state.name
+		} else {
+			pred_id = state.predecessor.nodeID
+			pred_addr = state.predecessor.address
+			pred_name = state.predecessor.name
+		
+		}
+		predecessor_info = &NodeInfoMsg{
+			NodeID: pred_id,
+			Address: pred_addr,
+			Name: pred_name,
+		}
+	} else {
+		future := context.RequestFuture(state.successor.pid, &RequestPredecessor{}, 1*time.Second)
+		result, err := future.Result()
+		if err != nil {
+			fmt.Printf("\t->[stabilize ERROR]: %v\n", err)
+			return
+		}
+		//response result expects to be a NodeInfoMsg
+		//now we have the sucessor's predecessor.
+		predecessor_info, _ = result.(*NodeInfoMsg)
+		// if !ok {
+		// 	fmt.Printf("\t->[stabilize ERROR]: expected a NodeInfoMsg message: %v\n", ok)
+		// 	return
+		// }
+	}
 	//check if that node is between you and your successor.
 	//if it is, we just found a closer successor, so update it.
 	if isBetween(predecessor_info.GetNodeID(), state.nodeID, state.successor.nodeID) {
