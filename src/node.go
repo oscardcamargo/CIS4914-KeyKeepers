@@ -4,93 +4,93 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
+	"github.com/asynkron/protoactor-go/actor"
 	"io"
 	"time"
-	"github.com/asynkron/protoactor-go/actor"
 )
 
 type NodeInfo struct {
-	pid *actor.PID
-	nodeID uint64
+	pid     *actor.PID
+	nodeID  uint64
 	address string
-	name string
+	name    string
 }
 
 type NodeActor struct {
-	nodeID		uint64 //Chord identifier (a hash)
-	address 	string
-	name		string
-	data 		map[string]string //piece of the overall hashtable this node holds
-	selfPID		*actor.PID //Proto.Actor identifier
-	successor 	*NodeInfo //actor that would be queried by this node
-	predecessor *NodeInfo //actor that would query this node
-	fingerTable []*NodeInfo //list of actors at the predetermined locations on the ring
+	nodeID      uint64 //Chord identifier (a hash)
+	address     string
+	name        string
+	data        map[string]string //piece of the overall hashtable this node holds
+	selfPID     *actor.PID        //Proto.Actor identifier
+	successor   *NodeInfo         //actor that would be queried by this node
+	predecessor *NodeInfo         //actor that would query this node
+	fingerTable []*NodeInfo       //list of actors at the predetermined locations on the ring
 }
 
 func (state *NodeActor) Receive(context actor.Context) {
 	fmt.Printf("[SYSTEM]: Received a message: [%T]\n", context.Message())
 	switch msg := context.Message().(type) {
-		case *Initialize:
-			//Initialize basic actor properties.
-			state.initialize(msg.GetAddress(), msg.GetName())
-			fmt.Println("[SYSTEM]: Intialization done. Your nodeID is: ", state.nodeID)
+	case *Initialize:
+		//Initialize basic actor properties.
+		state.initialize(msg.GetAddress(), msg.GetName())
+		fmt.Println("[SYSTEM]: Intialization done. Your nodeID is: ", state.nodeID)
 
-			if msg.GetRemoteAddress() != "" && msg.GetRemoteName() != "" {
-				//send join request to the provided remote node
-				join_node := actor.NewPID(msg.GetRemoteAddress(), msg.GetRemoteName())
-				state.join(join_node, context)
-				fmt.Printf("[SYSTEM]: Your PID is <%v>. Your successor's is <%v>", state.selfPID, state.successor.pid)
-				break
-				//MAYBE: send a Join message to the node we just joined so it can update itself?
-				//like update its successor, predecessor, fingerTable, etc. dont know how useful that would be yet.
-			}
-			//You can only get get here if you weren't provded a remote node.
-			//Therefore you're the first node, so set some initial values here.
-			state.successor = &NodeInfo{
-				pid: actor.NewPID(state.address, state.name),
-				nodeID: state.nodeID,
-				address: state.address,
-				name: state.name,
-			}
-			state.fingerTable[1] = state.successor
-			fmt.Println("[SYSTEM]: You are the first node!")
-			fmt.Printf("[SYSTEM]: Your PID is <%v>. Your successor's is <%v>\n", state.selfPID, state.successor.pid)
-		case *StabilizeSelf:
-			state.stabilize(context)
-		case *Notify:
-			target_PID := actor.NewPID(msg.GetAddress(), msg.GetName())
-			state.notify(&NodeInfo{
-				pid: target_PID,
-				nodeID: consistent_hash(msg.GetAddress()),
-				address: msg.GetAddress(),
-				name: msg.GetName(),
-			})
-		case *RequestSuccessor:
-			//this node was prompted for the successor of the node specified by the msg address. It MUST respond back!
-			//TODO: this may be changed so that only the nodeID is required in the message, instead of address AND name.
-			nodeInfo := state.find_successor(consistent_hash(msg.GetAddress()), context)
+		if msg.GetRemoteAddress() != "" && msg.GetRemoteName() != "" {
+			//send join request to the provided remote node
+			join_node := actor.NewPID(msg.GetRemoteAddress(), msg.GetRemoteName())
+			state.join(join_node, context)
+			fmt.Printf("[SYSTEM]: Your PID is <%v>. Your successor's is <%v>", state.selfPID, state.successor.pid)
+			break
+			//MAYBE: send a Join message to the node we just joined so it can update itself?
+			//like update its successor, predecessor, fingerTable, etc. dont know how useful that would be yet.
+		}
+		//You can only get get here if you weren't provded a remote node.
+		//Therefore you're the first node, so set some initial values here.
+		state.successor = &NodeInfo{
+			pid:     actor.NewPID(state.address, state.name),
+			nodeID:  state.nodeID,
+			address: state.address,
+			name:    state.name,
+		}
+		state.fingerTable[1] = state.successor
+		fmt.Println("[SYSTEM]: You are the first node!")
+		fmt.Printf("[SYSTEM]: Your PID is <%v>. Your successor's is <%v>\n", state.selfPID, state.successor.pid)
+	case *StabilizeSelf:
+		state.stabilize(context)
+	case *Notify:
+		target_PID := actor.NewPID(msg.GetAddress(), msg.GetName())
+		state.notify(&NodeInfo{
+			pid:     target_PID,
+			nodeID:  consistent_hash(msg.GetAddress()),
+			address: msg.GetAddress(),
+			name:    msg.GetName(),
+		})
+	case *RequestSuccessor:
+		//this node was prompted for the successor of the node specified by the msg address. It MUST respond back!
+		//TODO: this may be changed so that only the nodeID is required in the message, instead of address AND name.
+		nodeInfo := state.find_successor(consistent_hash(msg.GetAddress()), context)
+		context.Respond(&NodeInfoMsg{
+			NodeID:  nodeInfo.nodeID,
+			Address: nodeInfo.address,
+			Name:    nodeInfo.name,
+		})
+		fmt.Println("Responded to FindSuccessor back with node ", nodeInfo.address)
+	case *RequestPredecessor:
+		//this node was prompted for its predecessor by another node. Tt MUST respond back!
+		if state.predecessor == nil {
+			fmt.Println("Node was requested for its predecessor, but its NIL. Likely the first node in network -- responding with self!")
 			context.Respond(&NodeInfoMsg{
-				NodeID: nodeInfo.nodeID, 
-				Address: nodeInfo.address, 
-				Name: nodeInfo.name,
+				NodeID:  state.nodeID,
+				Address: state.address,
+				Name:    state.name,
 			})
-			fmt.Println("Responded to FindSuccessor back with node ", nodeInfo.address)
-		case *RequestPredecessor:
-			//this node was prompted for its predecessor by another node. Tt MUST respond back!
-			if state.predecessor == nil {
-				fmt.Println("Node was requested for its predecessor, but its NIL. Likely the first node in network -- responding with self!")
-				context.Respond(&NodeInfoMsg{
-					NodeID: state.nodeID,
-					Address: state.address,
-					Name: state.name,
-				})
-			} else {
-				context.Respond(&NodeInfoMsg{
-					NodeID: state.predecessor.nodeID,
-					Address: state.predecessor.address,
-					Name: state.predecessor.name,
-				})
-			}
+		} else {
+			context.Respond(&NodeInfoMsg{
+				NodeID:  state.predecessor.nodeID,
+				Address: state.predecessor.address,
+				Name:    state.predecessor.name,
+			})
+		}
 	}
 }
 
@@ -123,12 +123,12 @@ func (state *NodeActor) join(node *actor.PID, context actor.Context) {
 	if !ok {
 		fmt.Printf("\t->[join ERROR]: expected a NodeInfoMsg message: %v\n", ok)
 	}
-	
+
 	state.successor = &NodeInfo{
-		pid: actor.NewPID(successor_info.GetAddress(), successor_info.GetName()),
-		nodeID: successor_info.GetNodeID(),
+		pid:     actor.NewPID(successor_info.GetAddress(), successor_info.GetName()),
+		nodeID:  successor_info.GetNodeID(),
 		address: successor_info.GetAddress(),
-		name: successor_info.GetName(),
+		name:    successor_info.GetName(),
 	}
 
 	state.fingerTable[1] = state.successor
@@ -155,15 +155,15 @@ func (state *NodeActor) stabilize(context actor.Context) {
 			pred_id = state.predecessor.nodeID
 			pred_addr = state.predecessor.address
 			pred_name = state.predecessor.name
-		
+
 		}
 		predecessor_info = &NodeInfoMsg{
-			NodeID: pred_id,
+			NodeID:  pred_id,
 			Address: pred_addr,
-			Name: pred_name,
+			Name:    pred_name,
 		}
 	} else {
-		future := context.RequestFuture(state.successor.pid, &RequestPredecessor{}, 1*time.Second)
+		future := context.RequestFuture(state.successor.pid, &RequestPredecessor{}, 5*time.Second)
 		result, err := future.Result()
 		if err != nil {
 			fmt.Printf("\t->[stabilize ERROR]: %v\n", err)
@@ -181,10 +181,10 @@ func (state *NodeActor) stabilize(context actor.Context) {
 	//if it is, we just found a closer successor, so update it.
 	if isBetween(predecessor_info.GetNodeID(), state.nodeID, state.successor.nodeID) {
 		state.successor = &NodeInfo{
-			pid: state.predecessor.pid,
-			nodeID: state.predecessor.nodeID,
+			pid:     state.predecessor.pid,
+			nodeID:  state.predecessor.nodeID,
 			address: state.predecessor.address,
-			name: state.predecessor.name,
+			name:    state.predecessor.name,
 		}
 		fmt.Printf("\t->[stabilize]: updated your successor to: %v\n", state.successor.name)
 	}
@@ -193,12 +193,12 @@ func (state *NodeActor) stabilize(context actor.Context) {
 	context.Send(state.successor.pid, &Notify{Address: state.address, Name: state.name})
 }
 
-//accepts 64-bit id hash to identify node
+// accepts 64-bit id hash to identify node
 func (state *NodeActor) find_successor(id uint64, context actor.Context) *NodeInfo {
 	//finding successor of provided id
 	fmt.Printf("[find_successor]: started to find successor of %v\n", id)
 
-	// if your successor is yourself, youre the only one in the ring
+	// if your successor is yourself, you're the only one in the ring
 	//dealing with the first node in the ring, just return its successor
 	if state.successor.name == state.name {
 		fmt.Printf("\t->[find_sucessor]: Looks like only one node in ring, so returning successor\n")
@@ -213,21 +213,21 @@ func (state *NodeActor) find_successor(id uint64, context actor.Context) *NodeIn
 		node_info := state.closest_preceding_node(id)
 		fmt.Printf("\t->[find_successor]: Found the closest preceding node for [%v]: %v", state.name, node_info.name)
 
-		future := context.RequestFuture(node_info.pid, &RequestSuccessor{Address: state.address, Name: state.name}, time.Second)
+		future := context.RequestFuture(node_info.pid, &RequestSuccessor{Address: state.address, Name: state.name}, 5*time.Second)
 		result, err := future.Result()
 		if err != nil {
 			fmt.Printf("\n[Something went horribly wrong]: %v\n", err)
 		}
 		successor_info, ok := result.(*NodeInfoMsg)
 		if !ok {
-		fmt.Printf("Expected a NodeInfoMsg message: %v", ok)
+			fmt.Printf("Expected a NodeInfoMsg message: %v", ok)
 		}
-		
+
 		return &NodeInfo{
-			pid: actor.NewPID(successor_info.GetAddress(), successor_info.GetName()),
-			nodeID: successor_info.GetNodeID(),
+			pid:     actor.NewPID(successor_info.GetAddress(), successor_info.GetName()),
+			nodeID:  successor_info.GetNodeID(),
 			address: successor_info.GetAddress(),
-			name: successor_info.GetName(),
+			name:    successor_info.GetName(),
 		}
 	}
 }
@@ -249,13 +249,13 @@ func (state *NodeActor) closest_preceding_node(id uint64) *NodeInfo {
 	}
 	fmt.Println("Could not find result in finger table. Returning self instead...")
 	return &NodeInfo{
-		nodeID: state.nodeID,
+		nodeID:  state.nodeID,
 		address: state.address,
-		name: state.name,
+		name:    state.name,
 	}
 }
 
-//parameter node thinks its THIS node's predecessor
+// parameter node thinks its THIS node's predecessor
 func (state *NodeActor) notify(node_info *NodeInfo) {
 	if state.predecessor == nil || isBetween(node_info.nodeID, state.predecessor.nodeID, state.nodeID) {
 		state.predecessor = node_info
@@ -271,8 +271,8 @@ func consistent_hash(str string) uint64 {
 	return binary.BigEndian.Uint64(result)
 }
 
-//used for checking if id x is between (a, b)
-//note that between (a, b) and between (b, a) are both valid, yet different!
+// used for checking if id x is between (a, b)
+// note that between (a, b) and between (b, a) are both valid, yet different!
 func isBetween(x, a, b uint64) bool {
 	//if a < b then check regularly:
 	if a < b {
