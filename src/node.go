@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"time"
 	"github.com/asynkron/protoactor-go/actor"
 )
 
@@ -25,73 +24,144 @@ type NodeActor struct {
 	successor 	*NodeInfo //actor that would be queried by this node
 	predecessor *NodeInfo //actor that would query this node
 	fingerTable []*NodeInfo //list of actors at the predetermined locations on the ring
+
+	//state and flag variables for keeping track of requests and responses
+	findSuccessorResult *NodeInfo
+	currentPredecessorInfo *NodeInfo
+	awaitingJoinResponse bool
+	awaitingSuccessorResponse bool
+	awaitingPredecessorResponse bool
 }
 
 func (state *NodeActor) Receive(context actor.Context) {
 	fmt.Printf("[SYSTEM]: Received a message: [%T]\n", context.Message())
 	switch msg := context.Message().(type) {
 		case *Initialize:
-			//Initialize basic actor properties.
-			state.initialize(msg.GetAddress(), msg.GetName())
-			fmt.Println("[SYSTEM]: Intialization done. Your nodeID is: ", state.nodeID)
-
-			if msg.GetRemoteAddress() != "" && msg.GetRemoteName() != "" {
-				//send join request to the provided remote node
-				join_node := actor.NewPID(msg.GetRemoteAddress(), msg.GetRemoteName())
-				state.join(join_node, context)
-				fmt.Printf("[SYSTEM]: Your PID is <%v>. Your successor's is <%v>", state.selfPID, state.successor.pid)
-				break
-				//MAYBE: send a Join message to the node we just joined so it can update itself?
-				//like update its successor, predecessor, fingerTable, etc. dont know how useful that would be yet.
-			}
-			//You can only get get here if you weren't provded a remote node.
-			//Therefore you're the first node, so set some initial values here.
-			state.successor = &NodeInfo{
-				pid: actor.NewPID(state.address, state.name),
-				nodeID: state.nodeID,
-				address: state.address,
-				name: state.name,
-			}
-			state.fingerTable[1] = state.successor
-			fmt.Println("[SYSTEM]: You are the first node!")
-			//fmt.Printf("[SYSTEM]: Your PID is <%v>. Your successor's is <%v>\n", state.selfPID, state.successor.pid)
+			state.handleInitialize(msg, context)
 		case *StabilizeSelf:
 			state.stabilize(context)
+		case *DelayedStabilize:
 		case *Notify:
-			target_PID := actor.NewPID(msg.GetAddress(), msg.GetName())
-			state.notify(&NodeInfo{
-				pid: target_PID,
-				nodeID: consistent_hash(msg.GetAddress()),
-				address: msg.GetAddress(),
-				name: msg.GetName(),
-			})
+			state.handleNotify(msg)
 		case *RequestSuccessor:
-			//this node was prompted for the successor of the node specified by the msg address. It MUST respond back!
-			//TODO: this may be changed so that only the nodeID is required in the message, instead of address AND name.
-			nodeInfo := state.find_successor(consistent_hash(msg.GetAddress()), context)
-			context.Respond(&NodeInfoMsg{
-				NodeID: nodeInfo.nodeID, 
-				Address: nodeInfo.address, 
-				Name: nodeInfo.name,
-			})
-			//fmt.Println("Responded to FindSuccessor back with node ", nodeInfo.address)
+			state.handleRequestSuccessor(msg.GetAddress(), context)
 		case *RequestPredecessor:
-			//this node was prompted for its predecessor by another node. Tt MUST respond back!
-			if state.predecessor == nil {
-				fmt.Println("Node was requested for its predecessor, but its NIL. Likely the first node in network -- responding with self!")
-				context.Respond(&NodeInfoMsg{
-					NodeID: state.nodeID,
-					Address: state.address,
-					Name: state.name,
-				})
-			} else {
-				context.Respond(&NodeInfoMsg{
-					NodeID: state.predecessor.nodeID,
-					Address: state.predecessor.address,
-					Name: state.predecessor.name,
-				})
-			}
+			state.handleRequestPredecessor(context)
+		case *NodeInfoMsg:
+			state.handleResponse(msg, context)
 	}
+}
+
+//maybe use goroutines here?
+func (state *NodeActor) handleResponse(msg *NodeInfoMsg, context actor.Context) {
+	if(state.awaitingJoinResponse) {
+		successor_info := msg
+		state.successor = &NodeInfo{
+			pid: actor.NewPID(successor_info.GetAddress(), successor_info.GetName()),
+			nodeID: successor_info.GetNodeID(),
+			address: successor_info.GetAddress(),
+			name: successor_info.GetName(),
+		}
+		
+		//set the first index of finger table to successor
+		state.fingerTable[1] = state.successor
+		fmt.Printf("\t->[join]: Succesfully joined the ring. Successor has been set to [%v]\n", state.successor.name)
+		//fmt.Printf("[SYSTEM]: Your PID is <%v>. Your successor's is <%v>", state.selfPID, state.successor.pid)
+		state.awaitingJoinResponse = false
+	}
+
+	if(state.awaitingSuccessorResponse) {
+		//update the findSuccessorResult
+		state.findSuccessorResult = &NodeInfo{
+			pid: actor.NewPID(msg.GetAddress(), msg.GetName()),
+			nodeID: msg.GetNodeID(),
+			address: msg.GetAddress(),
+			name: msg.GetName(),
+		}
+
+		state.awaitingSuccessorResponse = false
+	}
+
+	//continue stabilize
+	if(state.awaitingPredecessorResponse) {
+		state.currentPredecessorInfo = &NodeInfo{
+			pid: actor.NewPID(msg.GetAddress(), msg.GetName()),
+			nodeID: msg.GetNodeID(),
+			address: msg.GetAddress(),
+			name: msg.GetName(),
+		}
+			//check if that node is between you and your successor.
+			//if it is, we just found a closer successor, so update it.
+			if isBetween(state.currentPredecessorInfo.nodeID, state.nodeID, state.successor.nodeID) {
+				state.successor = state.currentPredecessorInfo
+				fmt.Printf("\t->[stabilize]: updated your successor to: %v\n", state.successor.name)
+			}
+			//fmt.Println("Sending notify message to ", state.successor.name)
+			context.Send(state.successor.pid, &Notify{Address: state.address, Name: state.name})
+		state.awaitingPredecessorResponse = false
+	}
+}
+
+func (state *NodeActor) handleRequestPredecessor(context actor.Context) {
+	//this node was prompted for its predecessor by another node. It MUST respond back!
+	if state.predecessor == nil {
+		fmt.Println("Node was requested for its predecessor, but its NIL. Likely the first node in network -- responding with self!")
+		context.Respond(&NodeInfoMsg{
+			NodeID: state.nodeID,
+			Address: state.address,
+			Name: state.name,
+		})
+	} else {
+		context.Respond(&NodeInfoMsg{
+			NodeID: state.predecessor.nodeID,
+			Address: state.predecessor.address,
+			Name: state.predecessor.name,
+		})
+	}
+}
+
+func (state *NodeActor) handleRequestSuccessor(address string, context actor.Context) {
+	//this node was prompted for the successor of the node specified by the msg address. It MUST respond back!
+	//TODO: this may be changed so that only the nodeID is required in the message, instead of address AND name.
+	nodeInfo := state.find_successor(consistent_hash(address), context)
+	context.Respond(&NodeInfoMsg{
+		NodeID: nodeInfo.nodeID, 
+		Address: nodeInfo.address, 
+		Name: nodeInfo.name,
+	})
+	//fmt.Println("Responded to FindSuccessor back with node ", nodeInfo.address)
+}
+
+func (state *NodeActor) handleInitialize(msg *Initialize, context actor.Context) {
+	//Initialize basic actor properties.
+	state.initialize(msg.GetAddress(), msg.GetName())
+	fmt.Printf("[SYSTEM]: Your ID is <%v>.\n", state.nodeID)
+	if msg.GetRemoteAddress() != "" && msg.GetRemoteName() != "" {
+		//send join request to the provided remote node
+		join_node := actor.NewPID(msg.GetRemoteAddress(), msg.GetRemoteName())
+		state.join(join_node, context)
+		return
+	}
+	//You can only get get here if you weren't provded a remote node.
+	//Therefore you're the first node, so set some initial values here.
+	state.successor = &NodeInfo{
+		pid: actor.NewPID(state.address, state.name),
+		nodeID: state.nodeID,
+		address: state.address,
+		name: state.name,
+	}
+	state.fingerTable[1] = state.successor
+	fmt.Println("[SYSTEM]: You are the first node!")
+}
+
+func (state *NodeActor) handleNotify(msg *Notify) {
+	target_PID := actor.NewPID(msg.GetAddress(), msg.GetName())
+	state.notify(&NodeInfo{
+		pid: target_PID,
+		nodeID: consistent_hash(msg.GetAddress()),
+		address: msg.GetAddress(),
+		name: msg.GetName(),
+	})
 }
 
 func (state *NodeActor) initialize(address string, name string) {
@@ -107,103 +177,42 @@ func (state *NodeActor) initialize(address string, name string) {
 }
 
 // node attempting to join the ring calls this
+//GO
 func (state *NodeActor) join(node *actor.PID, context actor.Context) {
 	fmt.Println("[join]: This node is attempting to join node: ", node)
 	state.predecessor = nil
 
 	//call find successor on the node your joining, passing yourself in
+	state.awaitingJoinResponse = true
 	context.Request(node, &RequestSuccessor{Address: state.address, Name: state.name})
-	future := context.RequestFuture(node, &RequestSuccessor{Address: state.address, Name: state.name}, 1*time.Second)
-	result, err := future.Result()
-
-	for err != nil {
-		fmt.Printf("\t->[join ERROR]: %v\n", err)
-		fmt.Println("\t->[join]: Attempting to join again...")
-		future = context.RequestFuture(node, &RequestSuccessor{Address: state.address, Name: state.name}, 1*time.Second)
-		result, err = future.Result()	
-	}
-
-	//response result expects to be a NodeInfoMsg
-	successor_info, ok := result.(*NodeInfoMsg)
-	if !ok {
-		fmt.Printf("\t->[join ERROR]: expected a NodeInfoMsg message: %v\n", ok)
-	}
-	
-	state.successor = &NodeInfo{
-		pid: actor.NewPID(successor_info.GetAddress(), successor_info.GetName()),
-		nodeID: successor_info.GetNodeID(),
-		address: successor_info.GetAddress(),
-		name: successor_info.GetName(),
-	}
-	
-	//set the first index of finger table to successor
-	state.fingerTable[1] = state.successor
-	fmt.Printf("\t->[join]: Got a successor for [%v], its: %v\n", state.name, state.successor.name)
-	fmt.Printf("\t->[join]: Succesfully joined the ring. Precessor is set to [nil]. Successor has been set to [%v]\n", state.successor.name)
 }
 
+//GO
 func (state *NodeActor) stabilize(context actor.Context) {
 	//we need to get the predecessor of this node's successor
 	//must be done with message passing
 
 	//We need to make it a NodeInfoMsg here because that is what is returned by the RequestPredecessor
-	var predecessor_info *NodeInfoMsg
 
 	// Special case: If your successor is yourself, then this is the only node.
 	if state.successor.pid.String() == state.selfPID.String() {
-
-		// We need to initialize predecessor for first pass when predecessor = nil
-		pred_id := state.nodeID
-		pred_addr := state.address
-		pred_name := state.name
-
-		// If not nil, then just make it what it should be
-		if state.predecessor != nil {
-			pred_id = state.predecessor.nodeID
-			pred_addr = state.predecessor.address
-			pred_name = state.predecessor.name
+		if state.predecessor != nil && state.predecessor.pid.String() != state.selfPID.String() {
+		state.successor = state.predecessor
+        fmt.Printf("\t->[stabilize]: updated successor to: %v\n", state.successor.name)
 		}
-		
-		predecessor_info = &NodeInfoMsg{
-			NodeID: pred_id,
-			Address: pred_addr,
-			Name: pred_name,
+		if state.predecessor == nil {
+			context.Send(state.successor.pid, &Notify{Address: state.address, Name: state.name})
 		}
 	} else {
 		//NOT the only node in the ring
-		future := context.RequestFuture(state.successor.pid, &RequestPredecessor{}, 1*time.Second)
-		result, err := future.Result()
-		if err != nil {
-			fmt.Printf("\t->[stabilize ERROR]: %v\n", err)
-			return
-		}
-		//response result expects to be a NodeInfoMsg
-		//now we have the sucessor's predecessor.
-		pi, ok := result.(*NodeInfoMsg)
-		if !ok {
-			fmt.Printf("\t->[stabilize ERROR]: expected a NodeInfoMsg message: %v\n", ok)
-			return
-		}
-		predecessor_info = pi
-	}
-	//check if that node is between you and your successor.
-	//if it is, we just found a closer successor, so update it.
-	if isBetween(predecessor_info.GetNodeID(), state.nodeID, state.successor.nodeID) {
-		state.successor = &NodeInfo{
-			pid: actor.NewPID(predecessor_info.GetAddress(), predecessor_info.GetName()),
-			nodeID: predecessor_info.GetNodeID(),
-			address: predecessor_info.GetAddress(),
-			name: predecessor_info.GetName(),
-		}
-		fmt.Printf("\t->[stabilize]: updated your successor to: %v\n", state.successor.name)
-	}
+		state.awaitingPredecessorResponse = true
+		context.Request(state.successor.pid, &RequestPredecessor{})
 
-	//send the notify message to successor with this node's info
-	context.Send(state.successor.pid, &Notify{Address: state.address, Name: state.name})
-	//can we improve by not sending message if successor.predecessor is already this node?
-	
+		//i hate this
+	}
 }
 
+//GO
 //accepts 64-bit id hash to identify node
 func (state *NodeActor) find_successor(id uint64, context actor.Context) *NodeInfo {
 	//finding successor of provided id
@@ -224,23 +233,10 @@ func (state *NodeActor) find_successor(id uint64, context actor.Context) *NodeIn
 		node_info := state.closest_preceding_node(id)
 		fmt.Printf("\t->[find_successor]: Found the closest preceding node for [%v]: %v\n", id, node_info.name)
 
-		future := context.RequestFuture(node_info.pid, &RequestSuccessor{Address: state.address, Name: state.name}, time.Second)
-		result, err := future.Result()
-		if err != nil {
-			fmt.Printf("\n[Something went horribly wrong]: %v\n", err)
-		}
-		successor_info, ok := result.(*NodeInfoMsg)
-		if !ok {
-		fmt.Printf("Expected a NodeInfoMsg message: %v", ok)
-		}
-		
-		return &NodeInfo{
-			pid: actor.NewPID(successor_info.GetAddress(), successor_info.GetName()),
-			nodeID: successor_info.GetNodeID(),
-			address: successor_info.GetAddress(),
-			name: successor_info.GetName(),
-		}
+		state.awaitingSuccessorResponse = true;
+		context.Request(node_info.pid, &RequestSuccessor{Address: state.address, Name: state.name})
 	}
+	return state.findSuccessorResult
 }
 
 func (state *NodeActor) closest_preceding_node(id uint64) *NodeInfo {
@@ -285,7 +281,6 @@ func consistent_hash(str string) uint64 {
 }
 
 //used for checking if id x is between (a, b)
-//note that between (a, b) and between (b, a) are both valid, yet different!
 func isBetween(x, a, b uint64) bool {
 	//if a < b then check regularly:
 	if (a < b) {
