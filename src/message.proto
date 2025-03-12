@@ -3,38 +3,44 @@ syntax = "proto3";
 package main;
 option go_package = ".;main";
 
-message Join {
-    string address = 1;
-    string name = 2;
-}
 
 message Initialize {
-    string address = 1;
-    string name = 2;
-
-    string remoteAddress = 3;
+    string name = 1;
+    string address = 2;
     string remoteName = 4;
+    string remoteAddress = 3;
 }
 
-message StabilizeSelf {
+message StabilizeSelf {}
 
+message FixFingers {}
+
+//contains name and address of node to search for
+message RequestSuccessor {
+    uint64 nodeID = 1;
 }
+
+message RequestPredecessor {}
 
 message Notify {
-    string address = 1;
-    string name = 2;
-}
-
-message NodeInfoMsg {
-    uint64 nodeID = 1; 
+    string name = 1;
     string address = 2;
-    string name = 3;
+    uint64 nodeID = 3;
 }
 
-message RequestSuccessor {
-    string address = 1;
-    string name = 2;
+//contains name and address of the requested successor
+message SuccessorResponse {
+    string name = 1;
+    string address = 2;
+    uint64 nodeID = 3;
 }
 
-message RequestPredecessor {
+message Response {
+    string name = 1;
+    string address = 2;
+    uint64 nodeID = 3;
 }
+
+message InfoCommand {}
+
+message FingersCommand {}
