@@ -249,9 +249,9 @@ func (n *Node) printInfo() {
 }
 
 func (n *Node) printFingers() {
-	fmt.Println("========= FINGERS =========")
+	fmt.Println("========= FINGERS ========")
 	for i:= range n.fingerTable {
 		fmt.Printf("[%d] = <%s> (%d)\n", i, n.fingerTable[i].name, n.fingerTable[i].nodeID)
 	}
-	fmt.Println("===========================")
+	fmt.Println("==========================")
 }
