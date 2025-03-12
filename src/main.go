@@ -9,12 +9,12 @@ import (
 	"time"
 )
 
-func main() {
-  var testHash string = `4c3f9505b832a5a8bb22d5d339b1dfd4800d96d3ffec4a495fdc2274efa6601c`
-	var hashResult = checkHash(testHash)
 
-	fmt.Println(hashResult)
-  
+func main() {
+  	// var testHash string = `4c3f9505b832a5a8bb22d5d339b1dfd4800d96d3ffec4a495fdc2274efa6601c`
+	// var hashResult = checkHash(testHash)
+
+	// fmt.Println(hashResult)
 	var hostname string
 	var port int
 	// go run . <hostname> <port> <name> <remote_hostname> <remote_port> <remote_name>
@@ -32,7 +32,7 @@ func main() {
 	server.Start()
 
 	//Spawn the node
-	props := actor.PropsFromProducer(func() actor.Actor { return &NodeActor{} })
+	props := actor.PropsFromProducer(func() actor.Actor { return &Node{} })
 	node_name := os.Args[3]
 	node_pid, err := system.Root.SpawnNamed(props, node_name)
 	if err != nil {
@@ -55,13 +55,38 @@ func main() {
 	}
 
 	//Send the initialization message with the data required to set up the node properties
-	system.Root.Send(node_pid, &Initialize{Address: node_pid.GetAddress(), Name: node_pid.GetId(), RemoteAddress: remote_address, RemoteName: remote_name})
+	system.Root.Send(node_pid, &Initialize{Name: node_pid.GetId(), Address: node_pid.GetAddress(), RemoteName: remote_name, RemoteAddress: remote_address})
 	//time.Sleep(2*time.Second)
 
 	//used to keep the application running
 	//TODO: make a more graceful way of keeping it up and shutting it down
+	go func() {
+		var command string
+		for command != "quit" {
+				_, err := fmt.Scanf("%s\n", &command)
+			if err != nil {
+				fmt.Println("Error:", err)
+				continue
+			}
+	
+			switch(command) {
+			case "info":
+				system.Root.Send(node_pid, &InfoCommand{})
+			case "fingers":
+				system.Root.Send(node_pid, &FingersCommand{})
+			}
+		}
+	
+		os.Exit(1)
+	}()
+
 	for {
-		time.Sleep(5*time.Second)
+		time.Sleep(2500*time.Millisecond)
 		system.Root.Send(node_pid, &StabilizeSelf{})
+		time.Sleep(2500*time.Millisecond)
+		system.Root.Send(node_pid, &FixFingers{})
 	}
 }
+
+
+
