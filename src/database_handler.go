@@ -10,7 +10,7 @@ import (
 
 var db *sql.DB
 
-func init() {
+func inits() {
 	dbPath := "../malware_hashes.db"
 
 	var err error
