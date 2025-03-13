@@ -37,15 +37,15 @@ func TestJoinTenNodes(t *testing.T) {
 		time.Sleep(2500 * time.Millisecond)
 	}
 
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 8; i++ {
 		time.Sleep(2500 * time.Millisecond)
-		system.Root.Send(pids[i], &message.StabilizeSelf{})
+		system.Root.Send(pids[i%4], &message.StabilizeSelf{})
 		time.Sleep(2500 * time.Millisecond)
-		context.Send(pids[i], &message.FixFingers{})
+		context.Send(pids[i%4], &message.FixFingers{})
 		time.Sleep(2500 * time.Millisecond)
-		context.Send(pids[i], &message.InfoCommand{})
+		context.Send(pids[i%4], &message.InfoCommand{})
 		time.Sleep(2500 * time.Millisecond)
-		context.Send(pids[i], &message.FingersCommand{})
+		context.Send(pids[i%4], &message.FingersCommand{})
 	}
 
 }

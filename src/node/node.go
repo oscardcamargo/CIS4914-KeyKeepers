@@ -248,6 +248,7 @@ func isBetween(x, a, b uint64) bool {
 }
 
 func (n *Node) printInfo() {
+	time.Sleep(2500 * time.Millisecond)
 	fmt.Println("========== INFO ==========")
 	fmt.Printf("Name: %s\nID: %d\nPID: %v\nSuccessor: %s (%d)\nPredecessor: %s (%d)\n", n.name, n.nodeID, n.nodePID, n.successor.name, n.successor.nodeID, n.predecessor.name, n.predecessor.nodeID)
 	fmt.Println("==========================")
