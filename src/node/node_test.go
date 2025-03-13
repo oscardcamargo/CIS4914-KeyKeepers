@@ -32,8 +32,9 @@ func TestJoinTenNodes(t *testing.T) {
 		if i == 0 {
 			context.Send(pid, &message.Initialize{Name: pid.GetId(), Address: "nonhost"})
 		} else {
-			context.Send(pid, &message.Initialize{Name: pid.GetId(), Address: "nonhost", RemoteName: pid.GetId(), RemoteAddress: "nonhost"})
+			context.Send(pids[i-1], &message.Initialize{Name: pids[i-1].GetId(), Address: "nonhost", RemoteName: pid.GetId(), RemoteAddress: "nonhost"})
 		}
+		time.Sleep(2500 * time.Millisecond)
 	}
 
 	for i := 0; i < 10; i++ {

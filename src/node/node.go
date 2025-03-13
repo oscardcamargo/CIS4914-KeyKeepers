@@ -62,7 +62,8 @@ func (n *Node) Receive(context actor.Context) {
 func (n *Node) handleInitialize(parameters *message.Initialize, context actor.Context) {
 	n.name = parameters.GetName()
 	n.address = parameters.GetAddress()
-	n.nodeID = consistent_hash(n.address)
+	//n.nodeID = consistent_hash(n.address)
+	n.nodeID = consistent_hash(n.name)
 	n.nodePID = context.Self()
 	n.nextFingerIndex = 0
 	//n.fingerTable = make([]*NodeInfo, m)
