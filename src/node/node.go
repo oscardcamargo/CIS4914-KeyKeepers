@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"slices"
+	"time"
 )
 
 // m-bit identifier space
@@ -172,6 +173,7 @@ func (n *Node) notify(context actor.Context) {
 
 // context here is about the original sender
 func (n *Node) find_successor(id uint64, context actor.Context) {
+	time.Sleep(2500 * time.Millisecond)
 	if n.name == n.successor.name {
 		context.Respond(&message.Response{
 			Name:    n.successor.name,
