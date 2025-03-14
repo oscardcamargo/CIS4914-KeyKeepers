@@ -19,7 +19,7 @@ func main() {
 	var port int
 	// go run . <hostname> <port> <name> <remote_hostname> <remote_port> <remote_name>
 	if len(os.Args) < 4 {
-		fmt.Println("Bad command line arguments")
+		fmt.Println("Bad command line arguments");
 		return
 	} else {
 		hostname = os.Args[1]
@@ -58,8 +58,7 @@ func main() {
 	system.Root.Send(node_pid, &Initialize{Name: node_pid.GetId(), Address: node_pid.GetAddress(), RemoteName: remote_name, RemoteAddress: remote_address})
 	//time.Sleep(2*time.Second)
 
-	//used to keep the application running
-	//TODO: make a more graceful way of keeping it up and shutting it down
+	// go routine to capture user input
 	go func() {
 		var command string
 		for command != "quit" {
@@ -80,12 +79,16 @@ func main() {
 		os.Exit(1)
 	}()
 
+	//for loop to periodically stabilize and fix fingers
 	for {
 		time.Sleep(2500*time.Millisecond)
 		system.Root.Send(node_pid, &StabilizeSelf{})
 		time.Sleep(2500*time.Millisecond)
 		system.Root.Send(node_pid, &FixFingers{})
 	}
+
+	//TODO: make a graceful way of shutting down
+	//Maybe a shutdown message sent to the node ?
 }
 
 

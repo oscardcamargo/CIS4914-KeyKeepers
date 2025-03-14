@@ -30,6 +30,7 @@ type Node struct {
 	predecessor *NodeInfo
 	fingerTable []*NodeInfo
 
+	//flags for async behaviors
 	awaitingJoin bool
 	awaitingStabilize bool
 	awaitingFixFingers bool
@@ -45,11 +46,11 @@ func (n* Node) Receive(context actor.Context) {
 	case *FixFingers:
 		n.fixFingers(context)
 	case *RequestSuccessor:
-		n.find_successor(message.GetNodeID(), context)
+		n.findSuccessor(message.GetNodeID(), context)
 	case *RequestPredecessor:
 		n.handleRequestPredecessor(context)
 	case *Notify:
-		n.notify(context)
+		n.notify(message)
 	case *Response:
 		n.handleResponse(context)
 	case *InfoCommand:
@@ -75,8 +76,8 @@ func (n* Node) handleInitialize(parameters *Initialize, context actor.Context) {
 		n.predecessor = n.successor
 		fmt.Println("Ready.")
 	} else {
-		to_join := actor.NewPID(parameters.GetRemoteAddress(), parameters.GetRemoteName())
-		n.join(to_join, context)
+		toJoin := actor.NewPID(parameters.GetRemoteAddress(), parameters.GetRemoteName())
+		n.join(toJoin, context)
 		// dont put anything past here
 	}
 
@@ -84,6 +85,11 @@ func (n* Node) handleInitialize(parameters *Initialize, context actor.Context) {
 
 }
 
+/*
+Called after receiving a RequestPredecessor message from another node.
+This node will response with its own predecessor if it has one, otherwise it will respond with itself.
+The context object contains the sender (requester) for the RequestPredecessor message so calling Respond() will send it to the requesting node.
+*/
 func (n *Node) handleRequestPredecessor(context actor.Context) {
 	if n.predecessor == nil {
 		context.Respond(&Response{
@@ -100,29 +106,31 @@ func (n *Node) handleRequestPredecessor(context actor.Context) {
 	})
 }
 
+/*
+Called after receiving a Response message -- handles logic for several features depending on which flags are true at the time.
+The purpose of each flag is described above its corresponding block
+*/
 func (n *Node) handleResponse(context actor.Context) {
+	//Grab the message and make a NodeInfo object from its data to reuse later.
 	response := context.Message().(*Response)
-
 	reponseNodeInfo := &NodeInfo{
 		name: response.GetName(),
 		address: response.GetAddress(),
 		nodeID: response.GetNodeID(),
 	}
 
+	// awaitingJoin - true when join in process
+	// reponseNodeInfo is the successor that was previously requested
 	if n.awaitingJoin {
-		//finish the join process with the newly acquired successor
 		n.successor = reponseNodeInfo
-		n.fingerTable = slices.Repeat([]*NodeInfo{{
-			name: n.successor.name, 
-			address: n.successor.address, 
-			nodeID: n.successor.nodeID,
-			}}, m)
-			fmt.Println("Ready.")
+		n.fingerTable = slices.Repeat([]*NodeInfo{n.successor}, m)
+		fmt.Println("Ready.")
 		n.awaitingJoin = false 
 	}
 
+	// awaitingStabilize - true when stabilize in process
+	// reponseNodeInfo is the predecessor of the successor
 	if n.awaitingStabilize {
-		//fmt.Println("successor.predecessor = ", response.GetName())
 		if isBetween(response.GetNodeID(), n.nodeID, n.successor.nodeID) {
 			n.successor = reponseNodeInfo
 			n.fingerTable[0] = n.successor
@@ -144,20 +152,36 @@ func (n *Node) handleResponse(context actor.Context) {
 	}
 }
 
+/*
+==== NOTES ====
+* Uses awaitingJoin flag for async behavior
+* Rest of join process in handleResponse()
+*/
 func (n* Node) join(toJoin *actor.PID, context actor.Context) {
 	n.predecessor = nil
 	n.awaitingJoin = true
 	context.Request(toJoin, &RequestSuccessor{NodeID: n.nodeID})
 }
 
+/*
+==== NOTES ====
+* Purpose: updates the successor of the node and sends Notify message to new succesor
+* Called whenever a StabilizeSelf message is received from Root in main
+* Uses awaitingStabilize flag for async behavior
+* Rest of stabilize process in handleResponse()
+*/
 func (n *Node) stabilize(context actor.Context) {
 	succPID := actor.NewPID(n.successor.address, n.successor.name) 
 	n.awaitingStabilize = true
 	context.Request(succPID, &RequestPredecessor{})
 }
 
-func (n *Node) notify(context actor.Context) {
-	message := context.Message().(*Notify)
+/*
+==== NOTES ====
+* Purpose: update the predecessor of the node
+* Called whenever a Notify message is received from another node
+*/
+func (n *Node) notify(message *Notify) {
 	//fmt.Println("Message: ", message)
 	if n.predecessor == nil || isBetween(message.GetNodeID(), n.predecessor.nodeID, n.nodeID) {
 		n.predecessor = &NodeInfo{
@@ -169,8 +193,11 @@ func (n *Node) notify(context actor.Context) {
 	}
 }
 
-//context here is about the original sender
-func (n *Node) find_successor(id uint64, context actor.Context) {
+/*
+==== NOTES ====
+* Purpose: find and respond with the successor of the provided id
+*/
+func (n *Node) findSuccessor(id uint64, context actor.Context) {
 	if(n.name == n.successor.name) {
 		context.Respond(&Response{
 			Name: n.successor.name, 
@@ -184,7 +211,7 @@ func (n *Node) find_successor(id uint64, context actor.Context) {
 			NodeID: n.successor.nodeID,
 		})
 	} else {
-		u := n.closest_preceeding_node(id)
+		u := n.closestPreceedingNode(id)
 		context.Forward(u)
 	}
 }
@@ -207,10 +234,10 @@ func (n *Node) fixFingers(context actor.Context) {
 	context.Request(context.Self(), &RequestSuccessor{NodeID: start})
 }
 
-func (n *Node) closest_preceeding_node(id uint64) *actor.PID {
+func (n *Node) closestPreceedingNode(id uint64) *actor.PID {
 	for i := m-1; i >= 0; i-- {
 		if n.fingerTable[i] == nil {
-			break
+			continue
 		}
 		if isBetween(n.fingerTable[i].nodeID, n.nodeID, id) {
 			return actor.NewPID(n.fingerTable[i].address, n.fingerTable[i].name)
@@ -233,6 +260,7 @@ func consistent_hash(str string) uint64 {
 }
 
 //used for checking if id x is between (a, b)
+//accounts for wrap-arounds the ring
 func isBetween(x, a, b uint64) bool {
 	//if a < b then check regularly:
 	if (a < b) {
