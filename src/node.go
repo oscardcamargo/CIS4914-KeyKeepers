@@ -1,11 +1,6 @@
 package main
 
-
-
 import (
-	"github.com/asynkron/protoactor-go/actor"
-	"fmt"
-	"io"
 	"github.com/asynkron/protoactor-go/actor"
 	"fmt"
 	"io"
@@ -17,38 +12,16 @@ import (
 
 // m-bit identifier space
 const m int = 10
-	"math/rand/v2"
-	"slices"
-)
-
-// m-bit identifier space
-const m int = 10
 
 type NodeInfo struct {
 	name string
 	address string
-	name string
-	address string
 	nodeID uint64
 }
 
 type Node struct {
 	name string
-}
-
-type Node struct {
-	name string
 	address string
-	nodeID uint64
-	nodePID *actor.PID
-	nextFingerIndex int
-	successor *NodeInfo
-	predecessor *NodeInfo
-	fingerTable []*NodeInfo
-
-	awaitingJoin bool
-	awaitingStabilize bool
-	awaitingFixFingers bool
 	nodeID uint64
 	nodePID *actor.PID
 	nextFingerIndex int
@@ -62,28 +35,6 @@ type Node struct {
 	awaitingFixFingers bool
 }
 
-func (n* Node) Receive(context actor.Context) {
-	//fmt.Printf("%T\n", context.Message())
-	switch message := context.Message().(type) {
-	case *Initialize:
-		n.handleInitialize(message, context)
-	case *StabilizeSelf:
-		n.stabilize(context)
-	case *FixFingers:
-		n.fixFingers(context)
-	case *RequestSuccessor:
-		n.find_successor(message.GetNodeID(), context)
-	case *RequestPredecessor:
-		n.handleRequestPredecessor(context)
-	case *Notify:
-		n.notify(context)
-	case *Response:
-		n.handleResponse(context)
-	case *InfoCommand:
-		n.printInfo()
-	case *FingersCommand:
-		n.printFingers()
-	}
 func (n* Node) Receive(context actor.Context) {
 	//fmt.Printf("%T\n", context.Message())
 	switch message := context.Message().(type) {
@@ -238,7 +189,6 @@ func (n *Node) notify(message *Notify) {
 			nodeID: message.GetNodeID(),
 		}
 		fmt.Printf("\t->Updated predecessor to <%s>\n", n.predecessor.name)
-		fmt.Printf("\t->Updated predecessor to <%s>\n", n.predecessor.name)
 	}
 }
 
@@ -304,14 +254,6 @@ func consistent_hash(str string) uint64 {
         // Mask off the upper bits to keep only m bits
         value = value & ((1 << uint(m)) - 1)
     }
-
-	return value
-	value := binary.BigEndian.Uint64(result)
-	if m < 64 {
-        // Mask off the upper bits to keep only m bits
-        value = value & ((1 << uint(m)) - 1)
-    }
-
 	return value
 }
 
@@ -320,25 +262,10 @@ func consistent_hash(str string) uint64 {
 func isBetween(x, a, b uint64) bool {
 	//if a < b then check regularly:
 	if (a < b) {
-	if (a < b) {
 		return (a < x) && (x < b)
 	} else {
 		return a < x || x < b
 	}
-}
-
-func (n *Node) printInfo() {
-	fmt.Println("========== INFO ==========")
-	fmt.Printf("Name: %s\nID: %d\nPID: %v\nSuccessor: %s (%d)\nPredecessor: %s (%d)\n", n.name, n.nodeID, n.nodePID, n.successor.name, n.successor.nodeID, n.predecessor.name, n.predecessor.nodeID)
-	fmt.Println("==========================")
-}
-
-func (n *Node) printFingers() {
-	fmt.Println("========= FINGERS ========")
-	for i:= range n.fingerTable {
-		fmt.Printf("[%d] = <%s> (%d)\n", i, n.fingerTable[i].name, n.fingerTable[i].nodeID)
-	}
-	fmt.Println("==========================")
 }
 
 func (n *Node) printInfo() {
