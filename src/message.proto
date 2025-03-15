@@ -8,9 +8,15 @@ message Initialize {
     string name = 1;
     string address = 2;
     string remoteName = 4;
+    string name = 1;
+    string address = 2;
+    string remoteName = 4;
     string remoteAddress = 3;
 }
 
+message StabilizeSelf {}
+
+message FixFingers {}
 message StabilizeSelf {}
 
 message FixFingers {}
@@ -18,11 +24,19 @@ message FixFingers {}
 //contains name and address of node to search for
 message RequestSuccessor {
     uint64 nodeID = 1;
+//contains name and address of node to search for
+message RequestSuccessor {
+    uint64 nodeID = 1;
 }
 
 message RequestPredecessor {}
 
+message RequestPredecessor {}
+
 message Notify {
+    string name = 1;
+    string address = 2;
+    uint64 nodeID = 3;
     string name = 1;
     string address = 2;
     uint64 nodeID = 3;
@@ -31,7 +45,11 @@ message Notify {
 //contains name and address of the requested successor
 message SuccessorResponse {
     string name = 1;
+//contains name and address of the requested successor
+message SuccessorResponse {
+    string name = 1;
     string address = 2;
+    uint64 nodeID = 3;
     uint64 nodeID = 3;
 }
 
@@ -39,8 +57,15 @@ message Response {
     string name = 1;
     string address = 2;
     uint64 nodeID = 3;
+message Response {
+    string name = 1;
+    string address = 2;
+    uint64 nodeID = 3;
 }
 
+message InfoCommand {}
+
+message FingersCommand {}
 message InfoCommand {}
 
 message FingersCommand {}

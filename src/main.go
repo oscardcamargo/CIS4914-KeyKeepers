@@ -10,10 +10,14 @@ import (
 )
 
 
+
 func main() {
   	// var testHash string = `4c3f9505b832a5a8bb22d5d339b1dfd4800d96d3ffec4a495fdc2274efa6601c`
 	// var hashResult = checkHash(testHash)
+  	// var testHash string = `4c3f9505b832a5a8bb22d5d339b1dfd4800d96d3ffec4a495fdc2274efa6601c`
+	// var hashResult = checkHash(testHash)
 
+	// fmt.Println(hashResult)
 	// fmt.Println(hashResult)
 	var hostname string
 	var port int
@@ -32,6 +36,7 @@ func main() {
 	server.Start()
 
 	//Spawn the node
+	props := actor.PropsFromProducer(func() actor.Actor { return &Node{} })
 	props := actor.PropsFromProducer(func() actor.Actor { return &Node{} })
 	node_name := os.Args[3]
 	node_pid, err := system.Root.SpawnNamed(props, node_name)
@@ -55,6 +60,7 @@ func main() {
 	}
 
 	//Send the initialization message with the data required to set up the node properties
+	system.Root.Send(node_pid, &Initialize{Name: node_pid.GetId(), Address: node_pid.GetAddress(), RemoteName: remote_name, RemoteAddress: remote_address})
 	system.Root.Send(node_pid, &Initialize{Name: node_pid.GetId(), Address: node_pid.GetAddress(), RemoteName: remote_name, RemoteAddress: remote_address})
 	//time.Sleep(2*time.Second)
 
@@ -82,7 +88,10 @@ func main() {
 	//for loop to periodically stabilize and fix fingers
 	for {
 		time.Sleep(2500*time.Millisecond)
+		time.Sleep(2500*time.Millisecond)
 		system.Root.Send(node_pid, &StabilizeSelf{})
+		time.Sleep(2500*time.Millisecond)
+		system.Root.Send(node_pid, &FixFingers{})
 		time.Sleep(2500*time.Millisecond)
 		system.Root.Send(node_pid, &FixFingers{})
 	}
@@ -90,6 +99,9 @@ func main() {
 	//TODO: make a graceful way of shutting down
 	//Maybe a shutdown message sent to the node ?
 }
+
+
+
 
 
 
