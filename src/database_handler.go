@@ -11,9 +11,19 @@ import (
 	"time"
 )
 
-var dbPath string = "../malware_hashes.db"
-var dbFolder string = "../"
-var tableName string = "malware_hashes"
+var DB_PATH = "../malware_hashes.db"
+var DB_FOLDER = "../"
+var TABLE_NAME = "malware_hashes"
+
+var db *sql.DB
+var databaseLines []Range // Used to track which lines this node has in its database.
+var exportDBPath string
+
+type Range struct {
+	start int
+	end   int
+}
+
 var CREATE_TABLE_STATEMENT = `CREATE TABLE "malware_hashes" (
     "ID" INTEGER,
     "first_seen_utc" TEXT,
@@ -45,21 +55,12 @@ var CREATE_TABLE_STATEMENT = `CREATE TABLE "malware_hashes" (
     "alt_name13" TEXT
 );`
 
-type Range struct {
-	start int
-	end   int
-}
-
-var db *sql.DB
-var databaseLines []Range // Used to track which lines this node has in its database.
-var exportDBPath string
-
 func init() {
 	var err error
 
 	// Check that the database exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		fmt.Printf("Database file &v doesn't exist. Creating a new one.", dbPath)
+	if _, err := os.Stat(DB_PATH); os.IsNotExist(err) {
+		fmt.Printf("Database file %v doesn't exist. Creating a new one.", DB_PATH)
 		databaseLines = append(databaseLines, Range{start: 0, end: 0})
 
 		_, err = db.Exec(CREATE_TABLE_STATEMENT)
@@ -69,7 +70,7 @@ func init() {
 	}
 
 	//Open SQLite database
-	db, err = sql.Open("sqlite3", dbPath)
+	db, err = sql.Open("sqlite3", DB_PATH)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -81,9 +82,9 @@ func init() {
 		fmt.Println("Successfully connected to local sqlite database.")
 	}
 
-	getMax := fmt.Sprintf("SELECT MAX(ID) FROM %v", tableName)
-	getMin := fmt.Sprintf("SELECT MIN(ID) FROM %v", tableName)
-	var minID, maxID int = 0, 0 // These will stay 0 if there aren't lines in the database.
+	getMax := fmt.Sprintf("SELECT MAX(ID) FROM %v", TABLE_NAME)
+	getMin := fmt.Sprintf("SELECT MIN(ID) FROM %v", TABLE_NAME)
+	var minID, maxID = 0, 0 // These will stay 0 if there aren't lines in the database.
 	err = db.QueryRow(getMin).Scan(&minID)
 	if err != nil {
 		log.Fatal("Error reading database:", err)
@@ -101,16 +102,21 @@ func init() {
 }
 
 func checkHash(hash string) string {
-	var query string = `SELECT file_name, file_type_guess, signature, vtpercent, first_seen_utc, reporter
+	var query = `SELECT file_name, file_type_guess, signature, vtpercent, first_seen_utc, reporter
 	FROM malware_hashes
 	WHERE sha256_hash='` + hash + `';`
 
-	row, error := db.Query(query)
-	if error != nil {
-		fmt.Println(error)
+	row, err := db.Query(query)
+	if err != nil {
+		fmt.Println(err)
 	}
 
-	defer row.Close()
+	defer func(row *sql.Rows) {
+		err := row.Close()
+		if err != nil {
+
+		}
+	}(row)
 
 	var SQLResult string
 	for row.Next() {
@@ -120,8 +126,8 @@ func checkHash(hash string) string {
 		var vtpercent string
 		var firstSeen string
 		var reporter string
-		if error := row.Scan(&fileName, &fileType, &signature, &vtpercent, &firstSeen, &reporter); error != nil {
-			log.Fatal(error)
+		if err := row.Scan(&fileName, &fileType, &signature, &vtpercent, &firstSeen, &reporter); err != nil {
+			log.Fatal(err)
 		}
 
 		SQLResult = SQLResult + fmt.Sprintf("File Name: %s\nFile Type: %s\nSigning Authority: %s\nVirusTotal Percent: %s\nFirst Seen: %s\nReporter: %s\n",
@@ -142,14 +148,20 @@ func exportDatabaseLines(start int, end int) string {
 	newDBFileName := fmt.Sprintf("data_set_segment_%s_%d_%d.db", hostname, pid, time.Now().Unix())
 
 	var err error
-	newDB, err := sql.Open("sqlite3", dbFolder+newDBFileName)
+	newDB, err := sql.Open("sqlite3", DB_FOLDER+newDBFileName)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer newDB.Close()
+
+	defer func(newDB *sql.DB) {
+		err := newDB.Close()
+		if err != nil {
+
+		}
+	}(newDB)
 
 	// Attach source database to the new one.
-	attachQuery := fmt.Sprintf("ATTACH DATABASE '%v' AS src", dbPath)
+	attachQuery := fmt.Sprintf("ATTACH DATABASE '%v' AS src", DB_PATH)
 	_, err = newDB.Exec(attachQuery)
 	if err != nil {
 		log.Fatal("Error attaching source database to new database:", err)
@@ -158,7 +170,7 @@ func exportDatabaseLines(start int, end int) string {
 	// Get the CREATE TABLE statement from the main database.
 	var createTableSQL string
 	query := `SELECT sql FROM src.sqlite_master WHERE type='table' AND name='malware_hashes'`
-	err = newDB.QueryRow(query, tableName).Scan(&createTableSQL)
+	err = newDB.QueryRow(query, TABLE_NAME).Scan(&createTableSQL)
 	if err != nil {
 		log.Fatal("Error retrieving table schema:", err)
 	}
@@ -170,7 +182,7 @@ func exportDatabaseLines(start int, end int) string {
 	}
 
 	// Copy the range of data into the exported db
-	copyQuery := fmt.Sprintf("INSERT INTO %s SELECT * FROM src.%s WHERE ID >= ? AND ID <= ?", tableName, tableName)
+	copyQuery := fmt.Sprintf("INSERT INTO %s SELECT * FROM src.%s WHERE ID >= ? AND ID <= ?", TABLE_NAME, TABLE_NAME)
 	_, err = newDB.Exec(copyQuery, start, end)
 	if err != nil {
 		log.Fatal("Error copying data:", err)
@@ -178,7 +190,7 @@ func exportDatabaseLines(start int, end int) string {
 
 	// TODO: Does this need to return a Range struct to cover which lines were exported?
 	// return Range{start: start, end: end}
-	exportDBPath = dbPath + newDBFileName
+	exportDBPath = DB_FOLDER + newDBFileName
 
 	_, err = newDB.Exec(`DETACH DATABASE src`)
 	if err != nil {
@@ -192,14 +204,20 @@ func exportDatabaseLines(start int, end int) string {
 // Returns bool indicating success.
 func importDatabase(externalDBName string, newRanges []Range) bool {
 	var err error
-	externalDBPath := dbFolder + externalDBName
+	externalDBPath := DB_FOLDER + externalDBName
 
 	newDB, err := sql.Open("sqlite3", externalDBPath)
 	if err != nil {
 		log.Fatal(err)
 		return false
 	}
-	defer newDB.Close()
+
+	defer func(newDB *sql.DB) {
+		err := newDB.Close()
+		if err != nil {
+
+		}
+	}(newDB)
 
 	// Attach new db to main one
 	attachQuery := fmt.Sprintf("ATTACH DATABASE '%v' AS imported", externalDBPath)
@@ -210,7 +228,7 @@ func importDatabase(externalDBName string, newRanges []Range) bool {
 	}
 
 	// Copy data from imported db to main db.
-	copyQuery := fmt.Sprintf("INSERT INTO %s SELECT * FROM imported.%s", tableName, tableName)
+	copyQuery := fmt.Sprintf("INSERT INTO %s SELECT * FROM imported.%s", TABLE_NAME, TABLE_NAME)
 	_, err = db.Exec(copyQuery)
 	if err != nil {
 		log.Fatal("Error copying data:", err)
@@ -244,7 +262,7 @@ func importDatabase(externalDBName string, newRanges []Range) bool {
 // Deletes the range (from start to end) of database lines.
 // Returns bool indicating success.
 func deleteDatabaseLines(delStart int, delEnd int) bool {
-	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE ID >= ? AND ID <= ?", tableName)
+	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE ID >= ? AND ID <= ?", TABLE_NAME)
 
 	_, err := db.Exec(deleteQuery, delStart, delEnd)
 	if err != nil {
