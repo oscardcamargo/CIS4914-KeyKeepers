@@ -1,20 +1,20 @@
 package main
 
 import (
+	"fmt"
 	"github.com/asynkron/protoactor-go/actor"
 	"github.com/asynkron/protoactor-go/remote"
-	"fmt"
 	"os"
 	"strconv"
 	"time"
 )
 
 func main() {
-  var testHash string = `4c3f9505b832a5a8bb22d5d339b1dfd4800d96d3ffec4a495fdc2274efa6601c`
+	var testHash string = `4c3f9505b832a5a8bb22d5d339b1dfd4800d96d3ffec4a495fdc2274efa6601c`
 	var hashResult = checkHash(testHash)
 
 	fmt.Println(hashResult)
-  
+
 	var hostname string
 	var port int
 	// go run . <hostname> <port> <name> <remote_hostname> <remote_port> <remote_name>
@@ -38,7 +38,6 @@ func main() {
 	if err != nil {
 		fmt.Printf("[Actor spawn failed]: %v\n", err)
 	}
-	
 
 	//These parameters will change if a bootstrap node was provided
 	var remote_address string = ""
@@ -61,7 +60,7 @@ func main() {
 	//used to keep the application running
 	//TODO: make a more graceful way of keeping it up and shutting it down
 	for {
-		time.Sleep(5*time.Second)
+		time.Sleep(5 * time.Second)
 		system.Root.Send(node_pid, &StabilizeSelf{})
 	}
 }
