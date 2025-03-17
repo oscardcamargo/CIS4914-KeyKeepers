@@ -10,7 +10,7 @@ import (
 )
 
 type NodeInfo struct {
-	pid     *actor.PID
+	pid     *actor.PID // A struct comprised of Address, ID, and an optional Request ID
 	nodeID  uint64
 	address string
 	name    string
@@ -42,10 +42,11 @@ func (state *NodeActor) Receive(context actor.Context) {
 			fmt.Printf("[SYSTEM]: Your PID is <%v>. Your successor's is <%v>", state.selfPID, state.successor.pid)
 			break
 			//MAYBE: send a Join message to the node we just joined so it can update itself?
-			//like update its successor, predecessor, fingerTable, etc. dont know how useful that would be yet.
+			//like update its successor, predecessor, fingerTable, etc. don't know how useful that would be yet.
 		}
-		//You can only get get here if you weren't provded a remote node.
-		//Therefore you're the first node, so set some initial values here.
+
+		//You can only get here if you weren't provided a remote node.
+		//Therefore, you're the first node, so set some initial values here.
 		state.successor = &NodeInfo{
 			pid:     actor.NewPID(state.address, state.name),
 			nodeID:  state.nodeID,
@@ -54,10 +55,15 @@ func (state *NodeActor) Receive(context actor.Context) {
 		}
 		state.fingerTable[1] = state.successor
 		fmt.Println("[SYSTEM]: You are the first node!")
-		fmt.Printf("[SYSTEM]: Your PID is <%v>. Your successor's is <%v>\n", state.selfPID, state.successor.pid)
+		fmt.Printf("[SYSTEM]: Your PID is <%v>. Your successor is <%v>\n", state.selfPID, state.successor.pid)
+
 	case *StabilizeSelf:
 		state.stabilize(context)
+
 	case *Notify:
+		// This node was informed about a potential new predecessor
+
+		// PID is generated since Notify doesn't include that info. It's just a struct containing address and name.
 		target_PID := actor.NewPID(msg.GetAddress(), msg.GetName())
 		state.notify(&NodeInfo{
 			pid:     target_PID,
@@ -65,8 +71,10 @@ func (state *NodeActor) Receive(context actor.Context) {
 			address: msg.GetAddress(),
 			name:    msg.GetName(),
 		})
+
 	case *RequestSuccessor:
-		//this node was prompted for the successor of the node specified by the msg address. It MUST respond back!
+		//this node was prompted for its successor.
+
 		//TODO: this may be changed so that only the nodeID is required in the message, instead of address AND name.
 		nodeInfo := state.find_successor(consistent_hash(msg.GetAddress()), context)
 		context.Respond(&NodeInfoMsg{
@@ -74,9 +82,9 @@ func (state *NodeActor) Receive(context actor.Context) {
 			Address: nodeInfo.address,
 			Name:    nodeInfo.name,
 		})
-		fmt.Println("Responded to FindSuccessor back with node ", nodeInfo.address)
+		fmt.Printf("Responded to RequestSuccessor with node %v", nodeInfo.address)
 	case *RequestPredecessor:
-		//this node was prompted for its predecessor by another node. Tt MUST respond back!
+		//this node was prompted for its predecessor.
 		if state.predecessor == nil {
 			fmt.Println("Node was requested for its predecessor, but its NIL. Likely the first node in network -- responding with self!")
 			context.Respond(&NodeInfoMsg{
@@ -90,7 +98,9 @@ func (state *NodeActor) Receive(context actor.Context) {
 				Address: state.predecessor.address,
 				Name:    state.predecessor.name,
 			})
+			fmt.Println("Responded to RequestPredecessor back with node ", state.predecessor.address, ", ", state.predecessor.name)
 		}
+
 	}
 }
 
@@ -107,7 +117,7 @@ func (state *NodeActor) initialize(address string, name string) {
 }
 
 // node attempting to join the ring calls this
-func (state *NodeActor) join(node *actor.PID, context actor.Context) {
+func (state *NodeActor) join(node *actor.PID, context actor.Context) bool {
 	fmt.Println("[join]: This node is attempting to join node: ", node)
 	state.predecessor = nil
 
@@ -121,7 +131,8 @@ func (state *NodeActor) join(node *actor.PID, context actor.Context) {
 	//response result expects to be a NodeInfoMsg
 	successor_info, ok := result.(*NodeInfoMsg)
 	if !ok {
-		fmt.Printf("\t->[join ERROR]: expected a NodeInfoMsg message: %v\n", ok)
+		fmt.Printf("\t->[join ERROR]: Did not recieve NodeInfoMsg message.\n")
+		return false
 	}
 
 	state.successor = &NodeInfo{
@@ -134,6 +145,7 @@ func (state *NodeActor) join(node *actor.PID, context actor.Context) {
 	state.fingerTable[1] = state.successor
 	fmt.Printf("\t->[join]: Got a successor for [%v], its: %v\n", state.name, state.successor.name)
 	fmt.Printf("\t->[join]: Succesfully joined the ring. Precessor is set to [nil]. Successor has been set to [%v]\n", state.successor.name)
+	return true
 }
 
 func (state *NodeActor) stabilize(context actor.Context) {
@@ -141,7 +153,7 @@ func (state *NodeActor) stabilize(context actor.Context) {
 	//must be done with message passing
 	var predecessor_info *NodeInfoMsg
 
-	//We need to check if youre sending a message to yourself and handle it differently
+	//We need to check if you're sending a message to yourself and handle it differently
 	//Otherwise the node will deadlock itself with RequestFuture()... is there another way?
 	if state.successor.pid.String() == state.selfPID.String() {
 		fmt.Println("\t->[stabilize]: You played yourself...")
@@ -162,6 +174,8 @@ func (state *NodeActor) stabilize(context actor.Context) {
 			Address: pred_addr,
 			Name:    pred_name,
 		}
+		// TODO Determine if this return is required
+		return
 	} else {
 		future := context.RequestFuture(state.successor.pid, &RequestPredecessor{}, 5*time.Second)
 		result, err := future.Result()
@@ -255,12 +269,14 @@ func (state *NodeActor) closest_preceding_node(id uint64) *NodeInfo {
 	}
 }
 
-// parameter node thinks its THIS node's predecessor
+// parameter node thinks it's THIS node's predecessor, check if it is. Update it if it is.
 func (state *NodeActor) notify(node_info *NodeInfo) {
 	if state.predecessor == nil || isBetween(node_info.nodeID, state.predecessor.nodeID, state.nodeID) {
 		state.predecessor = node_info
-		fmt.Printf("[notify]: Updated predecessor to: %v\n", state.predecessor.name)
+		fmt.Printf("[notify]: Updated predecessor to: %v, %v\n", state.predecessor.address, state.predecessor.name)
 	}
+	// This can be uncommented to get more granular info on notifications. But it gets pretty spammy.
+	//fmt.Printf("[notify]: Notified of new node (%v, %v), but decided it's not a good fit\n", node_info.address, node_info.name)
 }
 
 func consistent_hash(str string) uint64 {
