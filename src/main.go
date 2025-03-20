@@ -87,6 +87,3 @@ func main() {
 		system.Root.Send(node_pid, &FixFingers{})
 	}
 }
-
-
-
