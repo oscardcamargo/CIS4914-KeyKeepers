@@ -2,13 +2,14 @@ package main
 
 import (
 	"fmt"
-	"github.com/asynkron/protoactor-go/actor"
-	"github.com/asynkron/protoactor-go/remote"
 	"net"
 	"os"
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/asynkron/protoactor-go/actor"
+	"github.com/asynkron/protoactor-go/remote"
 )
 
 // Returns the IP of the specified network link.
@@ -48,9 +49,13 @@ func getConnectionIP(connectionNumber int) string {
 }
 
 func main() {
+	// var testHash string = `4c3f9505b832a5a8bb22d5d339b1dfd4800d96d3ffec4a495fdc2274efa6601c`
+	// var hashResult = checkHash(testHash)
+
+	// fmt.Println(hashResult)
 	var hostname string
 	var port int
-	// go run . <hostname, IP, or connection#> <port> <name> <remote_hostname> <remote_port> <remote_name>
+	// go run . <hostname> <port> <name> <remote_hostname> <remote_port> <remote_name>
 	if len(os.Args) < 4 {
 		fmt.Println("Bad command line arguments")
 		return
@@ -83,18 +88,11 @@ func main() {
 
 	//Create the actor system on this network.
 	system := actor.NewActorSystem()
-
-	fmt.Println("Hostname: ", hostname)
-	fmt.Println("Port: ", port)
-	address := hostname + ":" + strconv.Itoa(port)
-	// TODO: remote.WithAdvertisedHost is optional. Determine what this affects as this might mess with binding to all interfaces option (0.0.0.0)
-	remoteConfig := remote.Configure(hostname, port, remote.WithAdvertisedHost(address))
-	//remoteConfig := remote.Configure(hostname, port)
-	server := remote.NewRemote(system, remoteConfig)
+	server := remote.NewRemote(system, remote.Configure(hostname, port))
 	server.Start()
 
 	//Spawn the node
-	props := actor.PropsFromProducer(func() actor.Actor { return &NodeActor{} })
+	props := actor.PropsFromProducer(func() actor.Actor { return &Node{} })
 	node_name := os.Args[3]
 	node_pid, err := system.Root.SpawnNamed(props, node_name)
 	if err != nil {
@@ -116,13 +114,35 @@ func main() {
 	}
 
 	//Send the initialization message with the data required to set up the node properties
-	system.Root.Send(node_pid, &Initialize{Address: node_pid.GetAddress(), Name: node_pid.GetId(), RemoteAddress: remote_address, RemoteName: remote_name})
+	system.Root.Send(node_pid, &Initialize{Name: node_pid.GetId(), Address: node_pid.GetAddress(), RemoteName: remote_name, RemoteAddress: remote_address})
 	//time.Sleep(2*time.Second)
 
 	//used to keep the application running
 	//TODO: make a more graceful way of keeping it up and shutting it down
+	go func() {
+		var command string
+		for command != "quit" {
+			_, err := fmt.Scanf("%s\n", &command)
+			if err != nil {
+				fmt.Println("Error:", err)
+				continue
+			}
+
+			switch command {
+			case "info":
+				system.Root.Send(node_pid, &InfoCommand{})
+			case "fingers":
+				system.Root.Send(node_pid, &FingersCommand{})
+			}
+		}
+
+		os.Exit(1)
+	}()
+
 	for {
-		time.Sleep(5 * time.Second)
+		time.Sleep(2500 * time.Millisecond)
 		system.Root.Send(node_pid, &StabilizeSelf{})
+		time.Sleep(2500 * time.Millisecond)
+		system.Root.Send(node_pid, &FixFingers{})
 	}
 }
