@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -60,6 +61,28 @@ func main() {
 		return
 	} else {
 		hostname = os.Args[1]
+		// Check for special hostname "connection#" to choose the #th network interface the computer has.
+		connectionRegex := regexp.MustCompile(`^connection(\d+)$`)
+		connectionMatch := connectionRegex.FindStringSubmatch(hostname)
+		if connectionMatch != nil {
+			connectionNumber, err := strconv.Atoi(connectionMatch[1])
+			if err != nil {
+				fmt.Println("Bad connection number")
+				return
+			}
+			hostname = getConnectionIP(connectionNumber)
+		}
+
+		fmt.Println("Arguments:")
+		fmt.Println("This server's IP: ", os.Args[1])
+		fmt.Println("This node's port: ", os.Args[2])
+		fmt.Println("This node's name: ", os.Args[3])
+
+		if len(os.Args) == 7 {
+			fmt.Println("Target hostname: ", os.Args[4])
+			fmt.Println("Target port: ", os.Args[5])
+			fmt.Println("Target Name: ", os.Args[6])
+		}
 		port, _ = strconv.Atoi(os.Args[2])
 	}
 
