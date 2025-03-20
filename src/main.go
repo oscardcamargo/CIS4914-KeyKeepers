@@ -1,17 +1,54 @@
 package main
 
 import (
-	"github.com/asynkron/protoactor-go/actor"
-	"github.com/asynkron/protoactor-go/remote"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/asynkron/protoactor-go/actor"
+	"github.com/asynkron/protoactor-go/remote"
 )
 
+// Returns the IP of the specified network link.
+// connectionNumber is which connection in the list to get. If 1, get the ip of the first network. If 2, gets the second, etc.
+// Docker external is often 1, Docker internal is often 3
+func getConnectionIP(connectionNumber int) string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		fmt.Println("Error:", err)
+		return "localhost"
+	}
+
+	counter := 1
+	for _, iface := range interfaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			fmt.Println("Error:", err)
+			continue
+		}
+
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
+				if counter != connectionNumber {
+					counter = counter + 1
+					continue
+				}
+
+				fmt.Println("Using listening IP:", ipNet.IP.String())
+				return ipNet.IP.String()
+			}
+		}
+	}
+
+	fmt.Println("Could not find connection number, using localhost.")
+	return "localhost"
+}
 
 func main() {
-  	// var testHash string = `4c3f9505b832a5a8bb22d5d339b1dfd4800d96d3ffec4a495fdc2274efa6601c`
+	// var testHash string = `4c3f9505b832a5a8bb22d5d339b1dfd4800d96d3ffec4a495fdc2274efa6601c`
 	// var hashResult = checkHash(testHash)
 
 	// fmt.Println(hashResult)
@@ -38,7 +75,6 @@ func main() {
 	if err != nil {
 		fmt.Printf("[Actor spawn failed]: %v\n", err)
 	}
-	
 
 	//These parameters will change if a bootstrap node was provided
 	var remote_address string = ""
@@ -63,30 +99,27 @@ func main() {
 	go func() {
 		var command string
 		for command != "quit" {
-				_, err := fmt.Scanf("%s\n", &command)
+			_, err := fmt.Scanf("%s\n", &command)
 			if err != nil {
 				fmt.Println("Error:", err)
 				continue
 			}
-	
-			switch(command) {
+
+			switch command {
 			case "info":
 				system.Root.Send(node_pid, &InfoCommand{})
 			case "fingers":
 				system.Root.Send(node_pid, &FingersCommand{})
 			}
 		}
-	
+
 		os.Exit(1)
 	}()
 
 	for {
-		time.Sleep(2500*time.Millisecond)
+		time.Sleep(2500 * time.Millisecond)
 		system.Root.Send(node_pid, &StabilizeSelf{})
-		time.Sleep(2500*time.Millisecond)
+		time.Sleep(2500 * time.Millisecond)
 		system.Root.Send(node_pid, &FixFingers{})
 	}
 }
-
-
-
