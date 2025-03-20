@@ -1,15 +1,14 @@
-package node
+package main
 
 import (
-	"KeyKeeper/message"
 	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
-	"github.com/asynkron/protoactor-go/actor"
 	"io"
 	"math/rand/v2"
 	"slices"
-	"time"
+
+	"github.com/asynkron/protoactor-go/actor"
 )
 
 // m-bit identifier space
@@ -39,28 +38,28 @@ type Node struct {
 func (n *Node) Receive(context actor.Context) {
 	//fmt.Printf("%T\n", context.Message())
 	switch message := context.Message().(type) {
-	case *message.Initialize:
+	case *Initialize:
 		n.handleInitialize(message, context)
-	case *message.StabilizeSelf:
+	case *StabilizeSelf:
 		n.stabilize(context)
-	case *message.FixFingers:
+	case *FixFingers:
 		n.fixFingers(context)
-	case *message.RequestSuccessor:
+	case *RequestSuccessor:
 		n.find_successor(message.GetNodeID(), context)
-	case *message.RequestPredecessor:
+	case *RequestPredecessor:
 		n.handleRequestPredecessor(context)
-	case *message.Notify:
+	case *Notify:
 		n.notify(context)
-	case *message.Response:
+	case *Response:
 		n.handleResponse(context)
-	case *message.InfoCommand:
+	case *InfoCommand:
 		n.printInfo()
-	case *message.FingersCommand:
+	case *FingersCommand:
 		n.printFingers()
 	}
 }
 
-func (n *Node) handleInitialize(parameters *message.Initialize, context actor.Context) {
+func (n *Node) handleInitialize(parameters *Initialize, context actor.Context) {
 	n.name = parameters.GetName()
 	n.address = parameters.GetAddress()
 	//n.nodeID = consistent_hash(n.address)
@@ -88,14 +87,14 @@ func (n *Node) handleInitialize(parameters *message.Initialize, context actor.Co
 
 func (n *Node) handleRequestPredecessor(context actor.Context) {
 	if n.predecessor == nil {
-		context.Respond(&message.Response{
+		context.Respond(&Response{
 			Name:    n.name,
 			Address: n.address,
 			NodeID:  n.nodeID,
 		})
 		return
 	}
-	context.Respond(&message.Response{
+	context.Respond(&Response{
 		Name:    n.predecessor.name,
 		Address: n.predecessor.address,
 		NodeID:  n.predecessor.nodeID,
@@ -103,7 +102,7 @@ func (n *Node) handleRequestPredecessor(context actor.Context) {
 }
 
 func (n *Node) handleResponse(context actor.Context) {
-	response := context.Message().(*message.Response)
+	response := context.Message().(*Response)
 
 	reponseNodeInfo := &NodeInfo{
 		name:    response.GetName(),
@@ -131,7 +130,7 @@ func (n *Node) handleResponse(context actor.Context) {
 			fmt.Printf("\t->Updated successor to <%s>\n", n.successor.name)
 		}
 		succPID := actor.NewPID(n.successor.address, n.successor.name)
-		context.Send(succPID, &message.Notify{
+		context.Send(succPID, &Notify{
 			Name:    n.name,
 			Address: n.address,
 			NodeID:  n.nodeID,
@@ -149,17 +148,17 @@ func (n *Node) handleResponse(context actor.Context) {
 func (n *Node) join(toJoin *actor.PID, context actor.Context) {
 	n.predecessor = nil
 	n.awaitingJoin = true
-	context.Request(toJoin, &message.RequestSuccessor{NodeID: n.nodeID})
+	context.Request(toJoin, &RequestSuccessor{NodeID: n.nodeID})
 }
 
 func (n *Node) stabilize(context actor.Context) {
 	succPID := actor.NewPID(n.successor.address, n.successor.name)
 	n.awaitingStabilize = true
-	context.Request(succPID, &message.RequestPredecessor{})
+	context.Request(succPID, &RequestPredecessor{})
 }
 
 func (n *Node) notify(context actor.Context) {
-	message := context.Message().(*message.Notify)
+	message := context.Message().(*Notify)
 	//fmt.Println("Message: ", message)
 	if n.predecessor == nil || isBetween(message.GetNodeID(), n.predecessor.nodeID, n.nodeID) {
 		n.predecessor = &NodeInfo{
@@ -173,15 +172,14 @@ func (n *Node) notify(context actor.Context) {
 
 // context here is about the original sender
 func (n *Node) find_successor(id uint64, context actor.Context) {
-	time.Sleep(2500 * time.Millisecond)
 	if n.name == n.successor.name {
-		context.Respond(&message.Response{
+		context.Respond(&Response{
 			Name:    n.successor.name,
 			Address: n.successor.address,
 			NodeID:  n.successor.nodeID,
 		})
 	} else if isBetween(id, n.nodeID, n.successor.nodeID+1) {
-		context.Respond(&message.Response{
+		context.Respond(&Response{
 			Name:    n.successor.name,
 			Address: n.successor.address,
 			NodeID:  n.successor.nodeID,
@@ -206,10 +204,10 @@ Notes:
 * finger[k] = first node succeeding id n + 2^k
 */
 func (n *Node) fixFingers(context actor.Context) {
-	n.nextFingerIndex = rand.IntN(m)
+	n.nextFingerIndex = rand.IntN(m) //[0, m)
 	start := (n.nodeID + (1 << n.nextFingerIndex)) % (1 << m)
 	n.awaitingFixFingers = true
-	context.Request(context.Self(), &message.RequestSuccessor{NodeID: start})
+	context.Request(context.Self(), &RequestSuccessor{NodeID: start})
 }
 
 func (n *Node) closest_preceeding_node(id uint64) *actor.PID {
@@ -248,7 +246,6 @@ func isBetween(x, a, b uint64) bool {
 }
 
 func (n *Node) printInfo() {
-	time.Sleep(2500 * time.Millisecond)
 	fmt.Println("========== INFO ==========")
 	fmt.Printf("Name: %s\nID: %d\nPID: %v\nSuccessor: %s (%d)\nPredecessor: %s (%d)\n", n.name, n.nodeID, n.nodePID, n.successor.name, n.successor.nodeID, n.predecessor.name, n.predecessor.nodeID)
 	fmt.Println("==========================")
