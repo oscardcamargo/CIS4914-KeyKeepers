@@ -56,7 +56,14 @@ func (n *Node) Receive(context actor.Context) {
 		n.printInfo()
 	case *FingersCommand:
 		n.printFingers()
+	case *Lookup:
+		//TODO: do something when a lookup message is received by a node
 	}
+}
+
+// TODO: add functionality for lookup
+func (n *Node) lookup() {
+
 }
 
 func (n *Node) handleInitialize(parameters *Initialize, context actor.Context) {

@@ -11,6 +11,11 @@ message Initialize {
     string remoteAddress = 3;
 }
 
+//TODO: add definition for lookup message
+message Lookup {
+
+}
+
 message StabilizeSelf {}
 
 message FixFingers {}
