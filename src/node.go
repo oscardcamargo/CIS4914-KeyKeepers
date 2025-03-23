@@ -1,33 +1,34 @@
 package main
 
 import (
-	"github.com/asynkron/protoactor-go/actor"
-	"fmt"
-	"io"
 	"crypto/sha1"
 	"encoding/binary"
+	"fmt"
+	"io"
 	"math/rand/v2"
 	"slices"
+
+	"github.com/asynkron/protoactor-go/actor"
 )
 
 // m-bit identifier space
 const m int = 10
 
 type NodeInfo struct {
-	name string
+	name    string
 	address string
-	nodeID uint64
+	nodeID  uint64
 }
 
 type Node struct {
-	name string
-	address string
-	nodeID uint64
-	nodePID *actor.PID
+	name            string
+	address         string
+	nodeID          uint64
+	nodePID         *actor.PID
 	nextFingerIndex int
-	successor *NodeInfo
-	predecessor *NodeInfo
-	fingerTable []*NodeInfo
+	successor       *NodeInfo
+	predecessor     *NodeInfo
+	fingerTable     []*NodeInfo
 
 	//flags for async behaviors
 	awaitingJoin bool
@@ -35,7 +36,7 @@ type Node struct {
 	awaitingFixFingers bool
 }
 
-func (n* Node) Receive(context actor.Context) {
+func (n *Node) Receive(context actor.Context) {
 	//fmt.Printf("%T\n", context.Message())
 	switch message := context.Message().(type) {
 	case *Initialize:
@@ -59,7 +60,7 @@ func (n* Node) Receive(context actor.Context) {
 	}
 }
 
-func (n* Node) handleInitialize(parameters *Initialize, context actor.Context) {
+func (n *Node) handleInitialize(parameters *Initialize, context actor.Context) {
 	n.name = parameters.GetName()
 	n.address = parameters.GetAddress()
 	n.nodeID = consistent_hash(n.address)
@@ -67,7 +68,7 @@ func (n* Node) handleInitialize(parameters *Initialize, context actor.Context) {
 	n.nextFingerIndex = 0
 	//n.fingerTable = make([]*NodeInfo, m)
 	n.awaitingJoin = false
-	
+
 	//check if first node and do the appropriate stuff
 	if parameters.GetRemoteAddress() == "" && parameters.GetRemoteName() == "" {
 		n.successor = &NodeInfo{name: n.name, address: n.address, nodeID: n.nodeID}
@@ -92,16 +93,16 @@ The context object contains the sender (requester) for the RequestPredecessor me
 func (n *Node) handleRequestPredecessor(context actor.Context) {
 	if n.predecessor == nil {
 		context.Respond(&Response{
-			Name: n.name,
+			Name:    n.name,
 			Address: n.address,
-			NodeID: n.nodeID,
+			NodeID:  n.nodeID,
 		})
 		return
 	}
 	context.Respond(&Response{
-		Name: n.predecessor.name,
+		Name:    n.predecessor.name,
 		Address: n.predecessor.address,
-		NodeID: n.predecessor.nodeID,
+		NodeID:  n.predecessor.nodeID,
 	})
 }
 
@@ -113,9 +114,9 @@ func (n *Node) handleResponse(context actor.Context) {
 	//Grab the message and make a NodeInfo object from its data to reuse later.
 	response := context.Message().(*Response)
 	reponseNodeInfo := &NodeInfo{
-		name: response.GetName(),
+		name:    response.GetName(),
 		address: response.GetAddress(),
-		nodeID: response.GetNodeID(),
+		nodeID:  response.GetNodeID(),
 	}
 
 	// awaitingJoin - true when join in process
@@ -135,11 +136,11 @@ func (n *Node) handleResponse(context actor.Context) {
 			n.fingerTable[0] = n.successor
 			fmt.Printf("\t->Updated successor to <%s>\n", n.successor.name)
 		}
-		succPID := actor.NewPID(n.successor.address, n.successor.name) 
+		succPID := actor.NewPID(n.successor.address, n.successor.name)
 		context.Send(succPID, &Notify{
-			Name: n.name,
+			Name:    n.name,
 			Address: n.address,
-			NodeID: n.nodeID,
+			NodeID:  n.nodeID,
 		})
 		n.awaitingStabilize = false
 	}
@@ -170,7 +171,7 @@ func (n* Node) join(toJoin *actor.PID, context actor.Context) {
 * Rest of stabilize process in handleResponse()
 */
 func (n *Node) stabilize(context actor.Context) {
-	succPID := actor.NewPID(n.successor.address, n.successor.name) 
+	succPID := actor.NewPID(n.successor.address, n.successor.name)
 	n.awaitingStabilize = true
 	context.Request(succPID, &RequestPredecessor{})
 }
@@ -184,9 +185,9 @@ func (n *Node) notify(message *Notify) {
 	//fmt.Println("Message: ", message)
 	if n.predecessor == nil || isBetween(message.GetNodeID(), n.predecessor.nodeID, n.nodeID) {
 		n.predecessor = &NodeInfo{
-			name: message.GetName(),
+			name:    message.GetName(),
 			address: message.GetAddress(),
-			nodeID: message.GetNodeID(),
+			nodeID:  message.GetNodeID(),
 		}
 		fmt.Printf("\t->Updated predecessor to <%s>\n", n.predecessor.name)
 	}
@@ -199,15 +200,15 @@ func (n *Node) notify(message *Notify) {
 func (n *Node) findSuccessor(id uint64, context actor.Context) {
 	if(n.name == n.successor.name) {
 		context.Respond(&Response{
-			Name: n.successor.name, 
+			Name:    n.successor.name,
 			Address: n.successor.address,
-			NodeID: n.successor.nodeID,
+			NodeID:  n.successor.nodeID,
 		})
-	} else if isBetween(id, n.nodeID, n.successor.nodeID + 1) {
+	} else if isBetween(id, n.nodeID, n.successor.nodeID+1) {
 		context.Respond(&Response{
-			Name: n.successor.name, 
+			Name:    n.successor.name,
 			Address: n.successor.address,
-			NodeID: n.successor.nodeID,
+			NodeID:  n.successor.nodeID,
 		})
 	} else {
 		u := n.closestPreceedingNode(id)
@@ -218,8 +219,10 @@ func (n *Node) findSuccessor(id uint64, context actor.Context) {
 /*
 === PSEUDOCODE ===
 n.fix_fingers():
+
 	i = random index > 1 into finger[];
 	finger[i].node = find_successor(finger[i].start);
+
 ==================
 Notes:
 * look in handleResponse() for rest of function
@@ -227,7 +230,7 @@ Notes:
 * finger[k] = first node succeeding id n + 2^k
 */
 func (n *Node) fixFingers(context actor.Context) {
-	n.nextFingerIndex = rand.IntN(m)
+	n.nextFingerIndex = rand.IntN(m) //[0, m)
 	start := (n.nodeID + (1 << n.nextFingerIndex)) % (1 << m)
 	n.awaitingFixFingers = true
 	context.Request(context.Self(), &RequestSuccessor{NodeID: start})
@@ -261,7 +264,7 @@ func consistent_hash(str string) uint64 {
 //accounts for wrap-arounds the ring
 func isBetween(x, a, b uint64) bool {
 	//if a < b then check regularly:
-	if (a < b) {
+	if a < b {
 		return (a < x) && (x < b)
 	} else {
 		return a < x || x < b
@@ -276,7 +279,7 @@ func (n *Node) printInfo() {
 
 func (n *Node) printFingers() {
 	fmt.Println("========= FINGERS ========")
-	for i:= range n.fingerTable {
+	for i := range n.fingerTable {
 		fmt.Printf("[%d] = <%s> (%d)\n", i, n.fingerTable[i].name, n.fingerTable[i].nodeID)
 	}
 	fmt.Println("==========================")
