@@ -59,31 +59,32 @@ func main() {
 	if len(os.Args) < 4 {
 		fmt.Println("Bad command line arguments")
 		return
-	} else {
-		hostname = os.Args[1]
-		// Check for special hostname "connection#" to choose the #th network interface the computer has.
-		connectionRegex := regexp.MustCompile(`^connection(\d+)$`)
-		connectionMatch := connectionRegex.FindStringSubmatch(hostname)
-		if connectionMatch != nil {
-			connectionNumber, err := strconv.Atoi(connectionMatch[1])
-			if err != nil {
-				fmt.Println("Bad connection number")
-				return
-			}
-			hostname = getConnectionIP(connectionNumber)
-		}
+	}
 
-		fmt.Println("Arguments:")
-		fmt.Println("This server's IP: ", os.Args[1])
-		fmt.Println("This node's port: ", os.Args[2])
-		fmt.Println("This node's name: ", os.Args[3])
-
-		if len(os.Args) == 7 {
-			fmt.Println("Target hostname: ", os.Args[4])
-			fmt.Println("Target port: ", os.Args[5])
-			fmt.Println("Target Name: ", os.Args[6])
+	hostname = os.Args[1]
+	// Check for special hostname "connection#" to choose the #th network interface the computer has.
+	connectionRegex := regexp.MustCompile(`^connection(\d+)$`)
+	connectionMatch := connectionRegex.FindStringSubmatch(hostname)
+	if connectionMatch != nil {
+		connectionNumber, err := strconv.Atoi(connectionMatch[1])
+		if err != nil {
+			fmt.Println("Bad connection number")
+			return
 		}
-		port, _ = strconv.Atoi(os.Args[2])
+		hostname = getConnectionIP(connectionNumber)
+	}
+
+	port, _ = strconv.Atoi(os.Args[2])
+
+	fmt.Println("Arguments:")
+	fmt.Println("This server's IP: ", os.Args[1])
+	fmt.Println("This node's port: ", os.Args[2])
+	fmt.Println("This node's name: ", os.Args[3])
+
+	if len(os.Args) == 7 {
+		fmt.Println("Target hostname: ", os.Args[4])
+		fmt.Println("Target port: ", os.Args[5])
+		fmt.Println("Target Name: ", os.Args[6])
 	}
 
 	//Create the actor system on this network.
