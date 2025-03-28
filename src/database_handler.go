@@ -107,42 +107,42 @@ func init() {
 	databaseLines = append(databaseLines, Range{start: minID, end: maxID})
 }
 
-func checkHash(hash string) (string, error) {
-	var query = `SELECT file_name, file_type_guess, signature, vtpercent, first_seen_utc, reporter
-	FROM malware_hashes
-	WHERE sha256_hash='` + hash + `';`
-
-	row, err := db.Query(query)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	defer func(row *sql.Rows) {
-		err := row.Close()
-		if err != nil {
-			fmt.Printf("[DATABASE] Error closing row: %v\n", err.Error())
-		}
-	}(row)
-
-	var SQLResult string
-	for row.Next() {
-		var fileName string
-		var fileType string
-		var signature string
-		var vtpercent string
-		var firstSeen string
-		var reporter string
-		if err := row.Scan(&fileName, &fileType, &signature, &vtpercent, &firstSeen, &reporter); err != nil {
-			fmt.Printf("[DATABASE] Error scanning row: %v\n", err.Error())
-			return "", err
-		}
-
-		SQLResult = SQLResult + fmt.Sprintf("File Name: %s\nFile Type: %s\nSigning Authority: %s\nVirusTotal Percent: %s\nFirst Seen: %s\nReporter: %s\n",
-			fileName, fileType, signature, vtpercent, firstSeen, reporter)
-	}
-
-	return SQLResult, nil
-}
+//func checkHash(hash string) (string, error) {
+//	var query = `SELECT file_name, file_type_guess, signature, vtpercent, first_seen_utc, reporter
+//	FROM malware_hashes
+//	WHERE sha256_hash='` + hash + `';`
+//
+//	row, err := db.Query(query)
+//	if err != nil {
+//		fmt.Println(err)
+//	}
+//
+//	defer func(row *sql.Rows) {
+//		err := row.Close()
+//		if err != nil {
+//			fmt.Printf("[DATABASE] Error closing row: %v\n", err.Error())
+//		}
+//	}(row)
+//
+//	var SQLResult string
+//	for row.Next() {
+//		var fileName string
+//		var fileType string
+//		var signature string
+//		var vtpercent string
+//		var firstSeen string
+//		var reporter string
+//		if err := row.Scan(&fileName, &fileType, &signature, &vtpercent, &firstSeen, &reporter); err != nil {
+//			fmt.Printf("[DATABASE] Error scanning row: %v\n", err.Error())
+//			return "", err
+//		}
+//
+//		SQLResult = SQLResult + fmt.Sprintf("File Name: %s\nFile Type: %s\nSigning Authority: %s\nVirusTotal Percent: %s\nFirst Seen: %s\nReporter: %s\n",
+//			fileName, fileType, signature, vtpercent, firstSeen, reporter)
+//	}
+//
+//	return SQLResult, nil
+//}
 
 // TODO: This needs unit tests
 // Saves the range (from start to end) of database lines to a separate database to be transferred to another node.
@@ -273,44 +273,44 @@ WHERE NOT EXISTS (
 // TODO: This needs unit tests
 // Deletes the range (from start to end) of database lines.
 // Returns bool indicating success.
-func deleteDatabaseLines(delRange Range) bool {
-	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE ID >= ? AND ID <= ?", TABLE_NAME)
-
-	_, err := db.Exec(deleteQuery, delRange.start, delRange.end)
-	if err != nil {
-		log.Printf("[DATABASE] Failed to delete lines from database: %v\n", err.Error())
-		return false
-	}
-
-	for index := 0; index < len(databaseLines); index++ {
-		rng := databaseLines[index]
-
-		// If delRange is fully within an existing range, split it into two
-		if rng.start < delRange.start && rng.end > delRange.end {
-			// Create a new range for the right-hand side
-			newRange := Range{start: delRange.end + 1, end: rng.end}
-
-			// Adjust the left-side range
-			databaseLines[index].end = delRange.start - 1
-
-			// Insert the new range after the adjusted left range
-			databaseLines = append(databaseLines[:index+1], append([]Range{newRange}, databaseLines[index+1:]...)...)
-			break // Exit since we modified the list
-		} else if rng.start == delRange.start && rng.end == delRange.end {
-			// If it exactly matches, remove the range
-			databaseLines = append(databaseLines[:index], databaseLines[index+1:]...)
-			index-- // Adjust the index after removal
-		} else if rng.start <= delRange.start && rng.end >= delRange.start {
-			// Trimming the right side
-			databaseLines[index].end = delRange.start - 1
-		} else if rng.start <= delRange.end && rng.end >= delRange.end {
-			// Trimming the left side
-			databaseLines[index].start = delRange.end + 1
-		}
-	}
-
-	return true
-}
+//func deleteDatabaseLines(delRange Range) bool {
+//	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE ID >= ? AND ID <= ?", TABLE_NAME)
+//
+//	_, err := db.Exec(deleteQuery, delRange.start, delRange.end)
+//	if err != nil {
+//		log.Printf("[DATABASE] Failed to delete lines from database: %v\n", err.Error())
+//		return false
+//	}
+//
+//	for index := 0; index < len(databaseLines); index++ {
+//		rng := databaseLines[index]
+//
+//		// If delRange is fully within an existing range, split it into two
+//		if rng.start < delRange.start && rng.end > delRange.end {
+//			// Create a new range for the right-hand side
+//			newRange := Range{start: delRange.end + 1, end: rng.end}
+//
+//			// Adjust the left-side range
+//			databaseLines[index].end = delRange.start - 1
+//
+//			// Insert the new range after the adjusted left range
+//			databaseLines = append(databaseLines[:index+1], append([]Range{newRange}, databaseLines[index+1:]...)...)
+//			break // Exit since we modified the list
+//		} else if rng.start == delRange.start && rng.end == delRange.end {
+//			// If it exactly matches, remove the range
+//			databaseLines = append(databaseLines[:index], databaseLines[index+1:]...)
+//			index-- // Adjust the index after removal
+//		} else if rng.start <= delRange.start && rng.end >= delRange.start {
+//			// Trimming the right side
+//			databaseLines[index].end = delRange.start - 1
+//		} else if rng.start <= delRange.end && rng.end >= delRange.end {
+//			// Trimming the left side
+//			databaseLines[index].start = delRange.end + 1
+//		}
+//	}
+//
+//	return true
+//}
 
 // TODO This needs unit tests
 // Consolidates the ranges in databaseLines.
@@ -376,6 +376,6 @@ func closeDB(thisDB *sql.DB) {
 }
 
 // Returns a slice of database lines.
-func getLineRange() []Range {
-	return databaseLines
-}
+//func getLineRange() []Range {
+//	return databaseLines
+//}
