@@ -107,42 +107,42 @@ func init() {
 	databaseLines = append(databaseLines, Range{start: minID, end: maxID})
 }
 
-//func checkHash(hash string) (string, error) {
-//	var query = `SELECT file_name, file_type_guess, signature, vtpercent, first_seen_utc, reporter
-//	FROM malware_hashes
-//	WHERE sha256_hash='` + hash + `';`
-//
-//	row, err := db.Query(query)
-//	if err != nil {
-//		fmt.Println(err)
-//	}
-//
-//	defer func(row *sql.Rows) {
-//		err := row.Close()
-//		if err != nil {
-//			fmt.Printf("[DATABASE] Error closing row: %v\n", err.Error())
-//		}
-//	}(row)
-//
-//	var SQLResult string
-//	for row.Next() {
-//		var fileName string
-//		var fileType string
-//		var signature string
-//		var vtpercent string
-//		var firstSeen string
-//		var reporter string
-//		if err := row.Scan(&fileName, &fileType, &signature, &vtpercent, &firstSeen, &reporter); err != nil {
-//			fmt.Printf("[DATABASE] Error scanning row: %v\n", err.Error())
-//			return "", err
-//		}
-//
-//		SQLResult = SQLResult + fmt.Sprintf("File Name: %s\nFile Type: %s\nSigning Authority: %s\nVirusTotal Percent: %s\nFirst Seen: %s\nReporter: %s\n",
-//			fileName, fileType, signature, vtpercent, firstSeen, reporter)
-//	}
-//
-//	return SQLResult, nil
-//}
+func checkHash(hash string) (string, error) {
+	var query = `SELECT file_name, file_type_guess, signature, vtpercent, first_seen_utc, reporter
+	FROM malware_hashes
+	WHERE sha256_hash='` + hash + `';`
+
+	row, err := db.Query(query)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	defer func(row *sql.Rows) {
+		err := row.Close()
+		if err != nil {
+			fmt.Printf("[DATABASE] Error closing row: %v\n", err.Error())
+		}
+	}(row)
+
+	var SQLResult string
+	for row.Next() {
+		var fileName string
+		var fileType string
+		var signature string
+		var vtpercent string
+		var firstSeen string
+		var reporter string
+		if err := row.Scan(&fileName, &fileType, &signature, &vtpercent, &firstSeen, &reporter); err != nil {
+			fmt.Printf("[DATABASE] Error scanning row: %v\n", err.Error())
+			return "", err
+		}
+
+		SQLResult = SQLResult + fmt.Sprintf("File Name: %s\nFile Type: %s\nSigning Authority: %s\nVirusTotal Percent: %s\nFirst Seen: %s\nReporter: %s\n",
+			fileName, fileType, signature, vtpercent, firstSeen, reporter)
+	}
+
+	return SQLResult, nil
+}
 
 // TODO: This needs unit tests
 // Saves the range (from start to end) of database lines to a separate database to be transferred to another node.
