@@ -101,8 +101,8 @@ func main() {
 	}
 
 	//These parameters will change if a bootstrap node was provided
-	var remote_address string = ""
-	var remote_name string = ""
+	var remote_address = ""
+	var remote_name = ""
 	if len(os.Args) == 7 {
 
 		remote_hostname := os.Args[4]
