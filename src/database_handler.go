@@ -269,6 +269,7 @@ WHERE NOT EXISTS (
 // TODO: This needs unit tests
 // Deletes the range (from start to end) of database lines.
 // Returns bool indicating success.
+/*
 func deleteDatabaseLines(delRange Range) bool {
 	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE ID >= ? AND ID <= ?", TABLE_NAME)
 
@@ -310,6 +311,7 @@ func deleteDatabaseLines(delRange Range) bool {
 
 	return true
 }
+*/
 
 // TODO This needs unit tests
 // Consolidates the ranges in databaseLines.

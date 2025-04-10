@@ -4,12 +4,11 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
+	"github.com/asynkron/protoactor-go/actor"
 	"io"
 	"math/rand/v2"
-	"slices"
-
-	"github.com/asynkron/protoactor-go/actor"
 	"os"
+	"slices"
 	"time"
 )
 
@@ -53,7 +52,6 @@ type transfer struct {
 }
 
 func (n *Node) Receive(context actor.Context) {
-	//fmt.Printf("%T\n", context.Message())
 	switch message := context.Message().(type) {
 	case *Initialize:
 		n.handleInitialize(message, context)
@@ -239,6 +237,9 @@ func (n *Node) notify(context actor.Context) {
 
 // context here is about the original sender
 func (n *Node) find_successor(message *RequestSuccessor, context actor.Context) {
+	if n.successor == nil { // If there is no successor none of the following functions can work.
+		return
+	}
 	if n.name == n.successor.name {
 		context.Respond(&Response{
 			Name:        n.successor.name,
