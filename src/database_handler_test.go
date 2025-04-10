@@ -245,6 +245,7 @@ func TestDeleteDatabaseLinesFirstFiveLines(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotEmpty(t, hashResult)
 
+	fmt.Println(getLineRange()[0])
 	importedDatabase := importDatabase(exportedDatabase, lines)
 	assert.True(t, importedDatabase, "Expected database to be imported successfully")
 	fmt.Println(getLineRange()[0])
