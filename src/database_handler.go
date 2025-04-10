@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"sort"
+	"time"
 )
 
 var DB_PATH = "../malware_hashes.db"
@@ -147,7 +148,6 @@ func checkHash(hash string) (string, error) {
 // Saves the range (from start to end) of database lines to a separate database to be transferred to another node.
 // Returns name of the saved file on success. Empty string on failure.
 // Call deleteExportDB when finished using the returned database to free up space.
-/*
 func exportDatabaseLines(lineSlice []Range) (string, error) {
 	// Check to make sure the ranges are in the database
 	for _, rng := range lineSlice {
@@ -218,7 +218,6 @@ func exportDatabaseLines(lineSlice []Range) (string, error) {
 
 	return newDBFileName, nil
 }
-*/
 
 // Adds all lines from another SQLite database, then deletes that file.
 // Returns bool indicating success.
