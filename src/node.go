@@ -185,10 +185,11 @@ func (n *Node) handleResponse(context actor.Context) {
 		}
 
 		if exists && (response.Status == Status_ERROR || response.Status == Status_DECLINE) {
-			if response.Status == Status_DECLINE {
-				fmt.Println("Peer declined database transfer.")
-			} else if response.Status == Status_ERROR {
+			switch response.Status {
+			case Status_ERROR:
 				fmt.Printf("Peer returned an error when starting database transfer: %v\n", response.Message)
+			case Status_DECLINE:
+				fmt.Println("Peer declined database transfer.")
 			}
 
 			if instance.retryCount < 3 {
@@ -295,7 +296,10 @@ func (n *Node) closest_preceeding_node(id uint64) *actor.PID {
 
 func consistent_hash(str string) uint64 {
 	hash := sha1.New()
-	io.WriteString(hash, str)
+	_, err := io.WriteString(hash, str)
+	if err != nil {
+		fmt.Println("[SYSTEM] Error hashing address:", err)
+	}
 	result := hash.Sum(nil)
 	value := binary.BigEndian.Uint64(result)
 	if m < 64 {
@@ -498,8 +502,7 @@ func (n *Node) startDatabaseTransfer(peer *actor.PID, context actor.Context, ran
 func (n *Node) sendChunk(outTransfer *transfer, context actor.Context) {
 	chunkSize := 1024 * 100 // 100kb
 	buffer := make([]byte, chunkSize)
-	var chunkMessage *FileChunk
-	chunkMessage = &FileChunk{
+	chunkMessage := &FileChunk{
 		Filename: outTransfer.fileName,
 	}
 
