@@ -179,8 +179,6 @@ func main() {
 			ips, err := net.LookupIP(remote_hostname)
 			if err != nil {
 				fmt.Println("[MAIN] Error resolving remote host:", err)
-				remote_hostname = "127.0.0.1"
-				return
 			}
 			remote_hostname = ips[0].String()
 			fmt.Printf("The IP address of %v resolved to %v\n", os.Args[6], remote_address)
@@ -198,7 +196,7 @@ func main() {
 	//TODO: make a more graceful way of keeping it up and shutting it down
 	go func() {
 		var command string
-		var interactable bool = true
+		var interactable = true
 		// Non-interactable environments (Such as docker containers) will error out if attempting to scanf
 		_, err := fmt.Scanf("%s\n", &command)
 		if err.Error() == "EOF" {
