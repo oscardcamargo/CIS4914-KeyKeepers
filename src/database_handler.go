@@ -144,7 +144,6 @@ func checkHash(hash string) (string, error) {
 	return SQLResult, nil
 }
 
-// TODO: This needs unit tests
 // Saves the range (from start to end) of database lines to a separate database to be transferred to another node.
 // Returns name of the saved file on success. Empty string on failure.
 // Call deleteExportDB when finished using the returned database to free up space.
@@ -270,47 +269,46 @@ WHERE NOT EXISTS (
 	return true
 }
 
-// TODO: This needs unit tests
 // Deletes the range (from start to end) of database lines.
 // Returns bool indicating success.
-//func deleteDatabaseLines(delRange Range) bool {
-//	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE ID >= ? AND ID <= ?", TABLE_NAME)
-//
-//	_, err := db.Exec(deleteQuery, delRange.start, delRange.end)
-//	if err != nil {
-//		log.Printf("[DATABASE] Failed to delete lines from database: %v\n", err.Error())
-//		return false
-//	}
-//
-//	for index := 0; index < len(databaseLines); index++ {
-//		rng := databaseLines[index]
-//
-//		// If delRange is fully within an existing range, split it into two
-//		if rng.start < delRange.start && rng.end > delRange.end {
-//			// Create a new range for the right-hand side
-//			newRange := Range{start: delRange.end + 1, end: rng.end}
-//
-//			// Adjust the left-side range
-//			databaseLines[index].end = delRange.start - 1
-//
-//			// Insert the new range after the adjusted left range
-//			databaseLines = append(databaseLines[:index+1], append([]Range{newRange}, databaseLines[index+1:]...)...)
-//			break // Exit since we modified the list
-//		} else if rng.start == delRange.start && rng.end == delRange.end {
-//			// If it exactly matches, remove the range
-//			databaseLines = append(databaseLines[:index], databaseLines[index+1:]...)
-//			index-- // Adjust the index after removal
-//		} else if rng.start <= delRange.start && rng.end >= delRange.start {
-//			// Trimming the right side
-//			databaseLines[index].end = delRange.start - 1
-//		} else if rng.start <= delRange.end && rng.end >= delRange.end {
-//			// Trimming the left side
-//			databaseLines[index].start = delRange.end + 1
-//		}
-//	}
-//
-//	return true
-//}
+func deleteDatabaseLines(delRange Range) bool {
+	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE ID >= ? AND ID <= ?", TABLE_NAME)
+
+	_, err := db.Exec(deleteQuery, delRange.start, delRange.end)
+	if err != nil {
+		log.Printf("[DATABASE] Failed to delete lines from database: %v\n", err.Error())
+		return false
+	}
+
+	for index := 0; index < len(databaseLines); index++ {
+		rng := databaseLines[index]
+
+		// If delRange is fully within an existing range, split it into two
+		if rng.start < delRange.start && rng.end > delRange.end {
+			// Create a new range for the right-hand side
+			newRange := Range{start: delRange.end + 1, end: rng.end}
+
+			// Adjust the left-side range
+			databaseLines[index].end = delRange.start - 1
+
+			// Insert the new range after the adjusted left range
+			databaseLines = append(databaseLines[:index+1], append([]Range{newRange}, databaseLines[index+1:]...)...)
+			break // Exit since we modified the list
+		} else if rng.start == delRange.start && rng.end == delRange.end {
+			// If it exactly matches, remove the range
+			databaseLines = append(databaseLines[:index], databaseLines[index+1:]...)
+			index-- // Adjust the index after removal
+		} else if rng.start <= delRange.start && rng.end >= delRange.start {
+			// Trimming the right side
+			databaseLines[index].end = delRange.start - 1
+		} else if rng.start <= delRange.end && rng.end >= delRange.end {
+			// Trimming the left side
+			databaseLines[index].start = delRange.end + 1
+		}
+	}
+
+	return true
+}
 
 // TODO This needs unit tests
 // Consolidates the ranges in databaseLines.
@@ -336,7 +334,7 @@ func rangeConsolidation() {
 // Call this when finished using the exported database from exportDatabaseLines().
 func deleteDB(fileName string) {
 	err := os.Remove(DB_FOLDER + fileName)
-	if err != nil || !errors.Is(err, os.ErrNotExist) {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Printf("[DATABASE] Failed to delete exported database: %v\n", err.Error())
 	}
 }
@@ -376,6 +374,6 @@ func closeDB(thisDB *sql.DB) {
 }
 
 // Returns a slice of database lines.
-//func getLineRange() []Range {
-//	return databaseLines
-//}
+func getLineRange() []Range {
+	return databaseLines
+}
