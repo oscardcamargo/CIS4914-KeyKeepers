@@ -18,7 +18,7 @@ import (
 func getConnectionIP(connectionNumber int) string {
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Println("[Main] Error getting network interfaces:", err)
 		return "localhost"
 	}
 
@@ -26,7 +26,7 @@ func getConnectionIP(connectionNumber int) string {
 	for _, iface := range interfaces {
 		addrs, err := iface.Addrs()
 		if err != nil {
-			fmt.Println("Error:", err)
+			fmt.Println("[Main] Error getting interface addresses:", err)
 			continue
 		}
 
@@ -48,9 +48,65 @@ func getConnectionIP(connectionNumber int) string {
 	return "localhost"
 }
 
+// Returns the IP a connection based on a specific subnet
+// Ex: "10.20.0.0/24" will return the IP address of a networking interface from the 10.20.0.x range.
+func getSubnetIP(subnet string) string {
+	_, ipnet, err := net.ParseCIDR(subnet)
+	if err != nil {
+		fmt.Printf("Invalid subnet: %v\n", err)
+		return ""
+	}
+
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		fmt.Println("[MAIN] Error getting network interfaces:", err)
+		return "localhost"
+	}
+
+	for _, iface := range interfaces {
+		/*
+			// This is to skip down or loopback interfaces, but maybe we want those?
+			// Maybe network interfaces come back up and loopback can connect to local nodes.
+				if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+					continue
+				}
+		*/
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			fmt.Println("[MAIN] Error getting interface addresses:", err)
+			continue
+		}
+
+		for _, addr := range addrs {
+			var ip net.IP
+
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+
+			// Only consider IPv4 addresses
+			if ip == nil || ip.To4() == nil {
+				continue
+			}
+
+			if ipnet.Contains(ip) {
+				fmt.Println("Using listening IP: ", ip.String())
+				return ip.String()
+			}
+		}
+	}
+
+	fmt.Printf("Could not find subnet %v, using localhost.", subnet)
+	return "localhost"
+}
+
 func main() {
-	// var testHash string = `4c3f9505b832a5a8bb22d5d339b1dfd4800d96d3ffec4a495fdc2274efa6601c`
-	// var hashResult = checkHash(testHash)
+	// var testHash string = `163c47c4e45116fc184c41428ec0cbbd60d2bdacb8df759d6f744f252d6c1305`
+	// hashResult, err := checkHash(testHash)
 
 	// fmt.Println(hashResult)
 	var hostname string
@@ -62,7 +118,8 @@ func main() {
 	}
 
 	hostname = os.Args[1]
-	// Check for special hostname "connection#" to choose the #th network interface the computer has.
+	// Check for special hostnames.
+	// "connection#" to choose the #th network interface the computer has
 	connectionRegex := regexp.MustCompile(`^connection(\d+)$`)
 	connectionMatch := connectionRegex.FindStringSubmatch(hostname)
 	if connectionMatch != nil {
@@ -72,6 +129,12 @@ func main() {
 			return
 		}
 		hostname = getConnectionIP(connectionNumber)
+	}
+	//or xxx.xxx.xxx.xxx/xx to choose an interface with the specific subnet
+	subnetRegex := regexp.MustCompile(`/\d{1,2}$`)
+	subnetMatch := subnetRegex.FindStringSubmatch(hostname)
+	if subnetMatch != nil {
+		hostname = getSubnetIP(hostname)
 	}
 
 	port, _ = strconv.Atoi(os.Args[2])
@@ -97,7 +160,7 @@ func main() {
 	node_name := os.Args[3]
 	node_pid, err := system.Root.SpawnNamed(props, node_name)
 	if err != nil {
-		fmt.Printf("[Actor spawn failed]: %v\n", err)
+		fmt.Printf("[MAIN] Actor spawn failed: %v\n", err)
 	}
 
 	//These parameters will change if a bootstrap node was provided
@@ -108,6 +171,19 @@ func main() {
 		remote_hostname := os.Args[4]
 		if remote_hostname == "localhost" {
 			remote_hostname = "127.0.0.1"
+		}
+
+		// Attempt to resolve hostname if the address is not an IP
+		_ = net.ParseIP(remote_hostname)
+		if net.ParseIP(remote_hostname) == nil {
+			ips, err := net.LookupIP(remote_hostname)
+			if err != nil {
+				fmt.Println("[MAIN] Error resolving remote host:", err)
+				remote_hostname = "127.0.0.1"
+				return
+			}
+			remote_hostname = ips[0].String()
+			fmt.Printf("The IP address of %v resolved to %v\n", os.Args[6], remote_address)
 		}
 
 		remote_address = fmt.Sprintf("%s:%s", remote_hostname, os.Args[5])
@@ -122,19 +198,28 @@ func main() {
 	//TODO: make a more graceful way of keeping it up and shutting it down
 	go func() {
 		var command string
+		var interactable bool = true
+		// Non-interactable environments (Such as docker containers) will error out if attempting to scanf
+		_, err := fmt.Scanf("%s\n", &command)
+		if err.Error() == "EOF" {
+			interactable = false
+		}
 		for command != "quit" {
-			_, err := fmt.Scanf("%s\n", &command)
-			if err != nil {
-				fmt.Println("Error:", err)
-				continue
-			}
+			if interactable {
+				_, err := fmt.Scanf("%s\n", &command)
+				if err != nil {
+					fmt.Println("[MAIN] Error scanning for commands:", err)
+					continue
+				}
 
-			switch command {
-			case "info":
-				system.Root.Send(node_pid, &InfoCommand{})
-			case "fingers":
-				system.Root.Send(node_pid, &FingersCommand{})
+				switch command {
+				case "info":
+					system.Root.Send(node_pid, &InfoCommand{})
+				case "fingers":
+					system.Root.Send(node_pid, &FingersCommand{})
+				}
 			}
+			time.Sleep(200 * time.Millisecond)
 		}
 
 		os.Exit(1)
