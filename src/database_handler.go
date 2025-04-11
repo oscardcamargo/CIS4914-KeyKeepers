@@ -99,6 +99,7 @@ func init() {
 		databaseLines = append(databaseLines, Range{start: 0, end: 0})
 	}
 	databaseLines = append(databaseLines, Range{start: minID, end: maxID})
+	fmt.Printf("This node has lines %d - %d\n", minID, maxID)
 }
 
 func checkHash(hash string) string {
@@ -261,8 +262,8 @@ func importDatabase(externalDBName string, newRanges []Range) bool {
 // TODO: This needs unit tests
 // Deletes the range (from start to end) of database lines.
 // Returns bool indicating success.
-func deleteDatabaseLines(delStart int, delEnd int) bool {
-	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE ID >= ? AND ID <= ?", TABLE_NAME)
+func deleteDatabaseLines(delStart int64, delEnd int64) bool {
+	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE hash64 >= ? AND hash64 <= ?", TABLE_NAME)
 
 	_, err := db.Exec(deleteQuery, delStart, delEnd)
 	if err != nil {
@@ -272,16 +273,16 @@ func deleteDatabaseLines(delStart int, delEnd int) bool {
 
 	for index, rng := range databaseLines {
 		// Check if part of the given range overlaps with a registered range.
-		if rng.start <= delStart && rng.end >= delStart {
-			if rng.start == delStart && rng.end == delEnd {
+		if rng.start <= int(delStart) && rng.end >= int(delStart) {
+			if rng.start == int(delStart) && rng.end == int(delEnd) {
 				remove(databaseLines, index)
 				break
 			}
 
-			rng.end = delStart
+			rng.end = int(delStart)
 
-		} else if rng.start <= delEnd && rng.end >= delEnd {
-			rng.start = delEnd
+		} else if rng.start <= int(delEnd) && rng.end >= int(delEnd) {
+			rng.start = int(delEnd)
 		}
 	}
 

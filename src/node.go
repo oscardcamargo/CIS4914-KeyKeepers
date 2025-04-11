@@ -12,7 +12,7 @@ import (
 )
 
 // m-bit identifier space
-const m int = 10
+const m int = 20
 
 type NodeInfo struct {
 	name    string
@@ -34,6 +34,8 @@ type Node struct {
 	awaitingJoin bool
 	awaitingStabilize bool
 	awaitingFixFingers bool
+
+	//(predecessor, node]
 }
 
 func (n *Node) Receive(context actor.Context) {
@@ -82,7 +84,6 @@ func (n *Node) handleInitialize(parameters *Initialize, context actor.Context) {
 	}
 
 	fmt.Println("ID: ", n.nodeID)
-
 }
 
 /*
@@ -143,6 +144,37 @@ func (n *Node) handleResponse(context actor.Context) {
 			NodeID:  n.nodeID,
 		})
 		n.awaitingStabilize = false
+
+		if n.predecessor != nil && n.nodeID != n.successor.nodeID {
+			//this node is reponsible for (predecessor.ID, node.ID]
+			fmt.Printf("This node's hash key range: %d - %d.\n", n.predecessor.nodeID, n.nodeID);
+			
+			//TODO: delete parts of local database outside of range
+			
+			//normal case
+			if n.predecessor.nodeID < n.nodeID {
+				//delete [0 , predecessor.ID]
+				//delete (node.ID, MAX]
+				if !deleteDatabaseLines(0, int64(n.predecessor.nodeID)) {
+					fmt.Println("Error deleting lines")
+				} else {
+					fmt.Printf("Successfully deleted lines %d - %d.\n", 0, int64(n.predecessor.nodeID))
+				}
+				if !deleteDatabaseLines(int64(n.nodeID + 1), (^int64(0))) {
+					fmt.Println("Error deleting lines")
+				} else {
+					fmt.Printf("Successfully deleted lines %d - %d.\n", int64(n.nodeID + 1), (^int64(0)))
+				}
+			} else {
+				//wrap around case
+				//delete (node.ID, predecessor.ID]
+				if !deleteDatabaseLines(int64(n.nodeID + 1), int64(n.predecessor.nodeID)) {
+					fmt.Println("Error deleting lines")
+				} else {
+					fmt.Printf("Successfully deleted lines %d - %d.\n", int64(n.nodeID + 1),  int64(n.predecessor.nodeID))
+				}
+			}
+		}
 	}
 
 	if n.awaitingFixFingers {
@@ -217,14 +249,7 @@ func (n *Node) findSuccessor(id uint64, context actor.Context) {
 }
 
 /*
-=== PSEUDOCODE ===
-n.fix_fingers():
-
-	i = random index > 1 into finger[];
-	finger[i].node = find_successor(finger[i].start);
-
-==================
-Notes:
+===== NOTES =====
 * look in handleResponse() for rest of function
 * chord paper uses indices [1, m] -- we use indices [0, m-1]
 * finger[k] = first node succeeding id n + 2^k
@@ -236,6 +261,7 @@ func (n *Node) fixFingers(context actor.Context) {
 	context.Request(context.Self(), &RequestSuccessor{NodeID: start})
 }
 
+//Specialized helper function used only in findSuccessor
 func (n *Node) closestPreceedingNode(id uint64) *actor.PID {
 	for i := m-1; i >= 0; i-- {
 		if n.fingerTable[i] == nil {
@@ -273,7 +299,7 @@ func isBetween(x, a, b uint64) bool {
 
 func (n *Node) printInfo() {
 	fmt.Println("========== INFO ==========")
-	fmt.Printf("Name: %s\nID: %d\nPID: %v\nSuccessor: %s (%d)\nPredecessor: %s (%d)\n", n.name, n.nodeID, n.nodePID, n.successor.name, n.successor.nodeID, n.predecessor.name, n.predecessor.nodeID)
+	fmt.Printf("Name: %s\nID: %d\nPID: %v\nSuccessor: %s (%d)\nPredecessor: %s (%d)\nKey range: %d - %d\n", n.name, n.nodeID, n.nodePID, n.successor.name, n.successor.nodeID, n.predecessor.name, n.predecessor.nodeID, n.predecessor.nodeID, n.nodeID)
 	fmt.Println("==========================")
 }
 
