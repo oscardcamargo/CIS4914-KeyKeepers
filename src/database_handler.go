@@ -267,6 +267,7 @@ WHERE NOT EXISTS (
 
 // Deletes the range (from start to end) of database lines.
 // Returns bool indicating success.
+
 func deleteDatabaseLines(delRange Range) bool {
 	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE ID >= ? AND ID <= ?", TABLE_NAME)
 
