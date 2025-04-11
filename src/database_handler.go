@@ -144,7 +144,6 @@ func checkHash(hash string) (string, error) {
 	return SQLResult, nil
 }
 
-// TODO: This needs unit tests
 // Saves the range (from start to end) of database lines to a separate database to be transferred to another node.
 // Returns name of the saved file on success. Empty string on failure.
 // Call deleteExportDB when finished using the returned database to free up space.
@@ -266,10 +265,9 @@ WHERE NOT EXISTS (
 	return true
 }
 
-// TODO: This needs unit tests
 // Deletes the range (from start to end) of database lines.
 // Returns bool indicating success.
-/*
+
 func deleteDatabaseLines(delRange Range) bool {
 	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE ID >= ? AND ID <= ?", TABLE_NAME)
 
@@ -311,9 +309,7 @@ func deleteDatabaseLines(delRange Range) bool {
 
 	return true
 }
-*/
 
-// TODO This needs unit tests
 // Consolidates the ranges in databaseLines.
 // If there are overlapping or adjacent ranges, it squishes them down into a single range.
 func rangeConsolidation() {
@@ -362,7 +358,7 @@ func openFileWrite(fileName string) (*os.File, error) {
 // Returns true if the whole of the given range is in one of the database's ranges. else, returns false.
 func rangeInDatabase(lineStart int, lineEnd int) bool {
 	for _, r := range databaseLines {
-		if lineStart >= r.start && lineEnd <= r.end {
+		if lineStart >= r.start && lineEnd <= r.end && lineStart <= lineEnd {
 			return true
 		}
 	}
@@ -377,8 +373,6 @@ func closeDB(thisDB *sql.DB) {
 }
 
 // Returns a slice of database lines.
-/*
 func getLineRange() []Range {
 	return databaseLines
 }
-*/
