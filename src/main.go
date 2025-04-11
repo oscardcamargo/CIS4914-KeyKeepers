@@ -53,38 +53,38 @@ func main() {
 	// var hashResult = checkHash(testHash)
 
 	// fmt.Println(hashResult)
-	// fmt.Println(hashResult)
 	var hostname string
 	var port int
 	// go run . <hostname> <port> <name> <remote_hostname> <remote_port> <remote_name>
 	if len(os.Args) < 4 {
 		fmt.Println("Bad command line arguments")
 		return
-	} else {
-		hostname = os.Args[1]
-		// Check for special hostname "connection#" to choose the #th network interface the computer has.
-		connectionRegex := regexp.MustCompile(`^connection(\d+)$`)
-		connectionMatch := connectionRegex.FindStringSubmatch(hostname)
-		if connectionMatch != nil {
-			connectionNumber, err := strconv.Atoi(connectionMatch[1])
-			if err != nil {
-				fmt.Println("Bad connection number")
-				return
-			}
-			hostname = getConnectionIP(connectionNumber)
-		}
+	}
 
-		fmt.Println("Arguments:")
-		fmt.Println("This server's IP: ", os.Args[1])
-		fmt.Println("This node's port: ", os.Args[2])
-		fmt.Println("This node's name: ", os.Args[3])
-
-		if len(os.Args) == 7 {
-			fmt.Println("Target hostname: ", os.Args[4])
-			fmt.Println("Target port: ", os.Args[5])
-			fmt.Println("Target Name: ", os.Args[6])
+	hostname = os.Args[1]
+	// Check for special hostname "connection#" to choose the #th network interface the computer has.
+	connectionRegex := regexp.MustCompile(`^connection(\d+)$`)
+	connectionMatch := connectionRegex.FindStringSubmatch(hostname)
+	if connectionMatch != nil {
+		connectionNumber, err := strconv.Atoi(connectionMatch[1])
+		if err != nil {
+			fmt.Println("Bad connection number")
+			return
 		}
-		port, _ = strconv.Atoi(os.Args[2])
+		hostname = getConnectionIP(connectionNumber)
+	}
+
+	port, _ = strconv.Atoi(os.Args[2])
+
+	fmt.Println("Arguments:")
+	fmt.Println("This server's IP: ", os.Args[1])
+	fmt.Println("This node's port: ", os.Args[2])
+	fmt.Println("This node's name: ", os.Args[3])
+
+	if len(os.Args) == 7 {
+		fmt.Println("Target hostname: ", os.Args[4])
+		fmt.Println("Target port: ", os.Args[5])
+		fmt.Println("Target Name: ", os.Args[6])
 	}
 
 	//Create the actor system on this network.
@@ -101,8 +101,8 @@ func main() {
 	}
 
 	//These parameters will change if a bootstrap node was provided
-	var remote_address string = ""
-	var remote_name string = ""
+	var remote_address = ""
+	var remote_name = ""
 	if len(os.Args) == 7 {
 
 		remote_hostname := os.Args[4]
@@ -116,8 +116,10 @@ func main() {
 
 	//Send the initialization message with the data required to set up the node properties
 	system.Root.Send(node_pid, &Initialize{Name: node_pid.GetId(), Address: node_pid.GetAddress(), RemoteName: remote_name, RemoteAddress: remote_address})
+	//time.Sleep(2*time.Second)
 
-	// go routine to capture user input
+	//used to keep the application running
+	//TODO: make a more graceful way of keeping it up and shutting it down
 	go func() {
 		var command string
 		for command != "quit" {
@@ -138,14 +140,10 @@ func main() {
 		os.Exit(1)
 	}()
 
-	//for loop to periodically stabilize and fix fingers
 	for {
 		time.Sleep(2500 * time.Millisecond)
 		system.Root.Send(node_pid, &StabilizeSelf{})
 		time.Sleep(2500 * time.Millisecond)
 		system.Root.Send(node_pid, &FixFingers{})
 	}
-
-	//TODO: make a graceful way of shutting down
-	//Maybe a shutdown message sent to the node ?
 }
