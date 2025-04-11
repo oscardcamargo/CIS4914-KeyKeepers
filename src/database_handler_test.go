@@ -184,6 +184,7 @@ func TestExportDatabaseLines(t *testing.T) {
 
 	result, err = exportDatabaseLines(lines)
 	assert.Error(t, err)
+	assert.Empty(t, result)
 
 	lines = []Range{
 		{start: 100000, end: 884470},
@@ -191,6 +192,7 @@ func TestExportDatabaseLines(t *testing.T) {
 
 	result, err = exportDatabaseLines(lines)
 	assert.Error(t, err)
+	assert.Empty(t, result)
 }
 
 /*
