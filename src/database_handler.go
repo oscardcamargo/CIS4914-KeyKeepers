@@ -230,10 +230,6 @@ func importDatabase(externalDBName string, newRanges []Range) bool {
 		return false
 	}
 
-	defer func(newDB *sql.DB) {
-		closeDB(newDB)
-	}(newDB)
-
 	// Attach new db to main one
 	attachQuery := fmt.Sprintf("ATTACH DATABASE '%v' AS imported", externalDBPath)
 	_, err = db.Exec(attachQuery)
@@ -293,16 +289,19 @@ func deleteDatabaseLines(delRange Range) bool {
 
 			// Insert the new range after the adjusted left range
 			databaseLines = append(databaseLines[:index+1], append([]Range{newRange}, databaseLines[index+1:]...)...)
-			break // Exit since we modified the list
-		} else if rng.start == delRange.start && rng.end == delRange.end {
-			// If it exactly matches, remove the range
+		} else if rng.start >= delRange.start && rng.end <= delRange.end {
+			// If it exactly matches or encompasses the range, remove the range
 			databaseLines = append(databaseLines[:index], databaseLines[index+1:]...)
 			index-- // Adjust the index after removal
-		} else if rng.start <= delRange.start && rng.end >= delRange.start {
-			// Trimming the right side
+		} else if rng.start < delRange.start &&
+			rng.end <= delRange.end && rng.end >= delRange.start {
+			// If the delete range extends past the right side, but still overlaps with the database range.
+			// Trim right side
 			databaseLines[index].end = delRange.start - 1
-		} else if rng.start <= delRange.end && rng.end >= delRange.end {
-			// Trimming the left side
+		} else if rng.start >= delRange.start && rng.start <= delRange.end &&
+			rng.end > delRange.end {
+			// If the delete range extends past the left side, but still overlaps with the database range.
+			// Trim the left side
 			databaseLines[index].start = delRange.end + 1
 		}
 	}
@@ -310,7 +309,6 @@ func deleteDatabaseLines(delRange Range) bool {
 	return true
 }
 
-// TODO This needs unit tests
 // Consolidates the ranges in databaseLines.
 // If there are overlapping or adjacent ranges, it squishes them down into a single range.
 func rangeConsolidation() {
@@ -334,7 +332,7 @@ func rangeConsolidation() {
 // Call this when finished using the exported database from exportDatabaseLines().
 func deleteDB(fileName string) {
 	err := os.Remove(DB_FOLDER + fileName)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err != nil || errors.Is(err, os.ErrNotExist) {
 		log.Printf("[DATABASE] Failed to delete exported database: %v\n", err.Error())
 	}
 }
@@ -359,7 +357,7 @@ func openFileWrite(fileName string) (*os.File, error) {
 // Returns true if the whole of the given range is in one of the database's ranges. else, returns false.
 func rangeInDatabase(lineStart int, lineEnd int) bool {
 	for _, r := range databaseLines {
-		if lineStart >= r.start && lineEnd <= r.end {
+		if lineStart >= r.start && lineEnd <= r.end && lineStart <= lineEnd {
 			return true
 		}
 	}
