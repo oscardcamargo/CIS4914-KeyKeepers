@@ -269,7 +269,7 @@ WHERE NOT EXISTS (
 // Returns bool indicating success.
 
 func deleteDatabaseLines(delRange Range) bool {
-	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE ID >= ? AND ID <= ?", TABLE_NAME)
+	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE sha1_hash >= ? AND sha1_hash <= ?", TABLE_NAME)
 
 	_, err := db.Exec(deleteQuery, delRange.start, delRange.end)
 	if err != nil {
@@ -375,4 +375,54 @@ func closeDB(thisDB *sql.DB) {
 // Returns a slice of database lines.
 func getLineRange() []Range {
 	return databaseLines
+}
+
+//Used for getting the IDs of selected SHA1 hashes
+func getRowsInHashRange(startHash, endHash string) ([]int, error) {
+	query := fmt.Sprintf(`SELECT ID FROM %s WHERE sha1_hash > ? AND sha1_hash <= ?`, TABLE_NAME)
+
+	rows, err := db.Query(query, startHash, endHash)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+
+	return ids, nil
+}
+
+//Used for batching adjacent IDs based on selected SHA1 hashes
+func batchIDs(ids []int) []Range {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	sort.Ints(ids) // Ensure IDs are sorted.
+
+	var ranges []Range
+	start := ids[0]
+	end := ids[0]
+
+	for i := 1; i < len(ids); i++ {
+		if ids[i] == end+1 {
+			// Adjacent ID, extend the current range
+			end = ids[i]
+		} else {
+			// Non-adjacent, save previous range and start new one
+			ranges = append(ranges, Range{start: start, end: end})
+			start, end = ids[i], ids[i]
+		}
+	}
+
+	// Append the final range
+	ranges = append(ranges, Range{start: start, end: end})
+	return ranges
 }

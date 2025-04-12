@@ -199,7 +199,7 @@ func main() {
 		var interactable = true
 		// Non-interactable environments (Such as docker containers) will error out if attempting to scanf
 		_, err := fmt.Scanf("%s\n", &command)
-		if err.Error() == "EOF" {
+		if err != nil && err.Error() == "EOF" {
 			interactable = false
 		}
 		for command != "quit" {
