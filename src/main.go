@@ -224,9 +224,9 @@ func main() {
 	}()
 
 	for {
-		time.Sleep(2500 * time.Millisecond)
+		time.Sleep(250 * time.Millisecond)
 		system.Root.Send(node_pid, &StabilizeSelf{})
-		time.Sleep(2500 * time.Millisecond)
+		time.Sleep(250 * time.Millisecond)
 		system.Root.Send(node_pid, &FixFingers{})
 	}
 }
