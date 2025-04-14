@@ -41,9 +41,6 @@
     - The original malware signature dataset is available at [MalwareBazaar](https://bazaar.abuse.ch).
     - A modified and compatible version for this system is hosted [here on Google Drive](https://drive.google.com/drive/folders/18VmFDWQL1ayjJoP8AZCehXTQowhdQHd4).
     - **Download** the file `malware_hashes.db` and place it in the project directory (`CIS4914-KeyKeepers`).
-
-Got it! If the node is the first in the network, those remote fields should be left **empty**, not filled with placeholders like `self`. Here's the updated section of the `README.md` to reflect that clearly:
-
 ---
 
 ## ⚙️ Running a Node
