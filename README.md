@@ -16,31 +16,58 @@
 
 ## 🚀 Installation & Setup
 
-1. **Clone the Repository:**
+1. **Clone the Repository**
 
    ```bash
    git clone https://github.com/oscardcamargo/CIS4914-KeyKeepers.git
    ```
 
-2. **Navigate to the Source Directory:**
+2. **Navigate to the Source Directory**
 
    ```bash
    cd CIS4914-KeyKeepers/src
    ```
 
-3. **Install Dependencies:**
+3. **Install Dependencies**
 
-   Run this command to download required Go modules:
+   Run the following command to download the required Go modules:
 
    ```bash
    go mod tidy
    ```
 
-4. **Download the Database:**
+4. **Download the Database**
 
     - The original malware signature dataset is available at [MalwareBazaar](https://bazaar.abuse.ch).
-    - A modified and compatible version for this system is hosted [here on Google Drive](https://drive.google.com/drive/folders/18VmFDWQL1ayjJoP8AZCehXTQowhdQHd4).
-    - **Download** the file `malware_hashes.db` and place it in the project directory (`CIS4914-KeyKeepers`).
+    - A modified and compatible version for this system is hosted [on Google Drive](https://drive.google.com/drive/folders/18VmFDWQL1ayjJoP8AZCehXTQowhdQHd4).
+    - **Download** the file `malware_hashes.db` and place it in the root project directory (`CIS4914-KeyKeepers`).
+
+5. **Enable CGO for SQLite Support (Windows Only)**
+
+   To run the program locally with SQLite, Go needs to be able to compile C code:
+
+   **Step 1: Set Environment Variable**
+
+    - Add the following to your IDE's environment variables:
+      ```
+      CGO_ENABLED=1
+      ```
+    - **In GoLand**:  
+      Go to `Run` → `Edit Configurations...` → Select your run/build configuration (e.g., `go build main.go`) →  
+      Add `CGO_ENABLED=1` to the "Environment variables" field.
+
+   **Step 2: Install `tdm-gcc`**
+
+    - Download the 64+32-bit MinGW-w64 edition from [this page](https://jmeubank.github.io/tdm-gcc/articles/2021-05/10.3.0-release).
+    - After installation, add the `bin` folder to your system's PATH:
+        1. Search for **"Environment Variables"** in Windows.
+        2. Under **System Variables**, find `Path` → click **Edit**.
+        3. Click **New** and add:
+           ```
+           C:\TDM-GCC-64\bin
+           ```
+           *(or wherever you installed TDM-GCC)*
+
 ---
 
 ## ⚙️ Running a Node
