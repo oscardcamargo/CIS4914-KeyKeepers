@@ -2,7 +2,7 @@ package main
 
 import (
 	"crypto/sha1"
-	//"encoding/binary"
+	"encoding/binary"
 	"fmt"
 	"github.com/asynkron/protoactor-go/actor"
 	"io"
@@ -150,53 +150,66 @@ func (n *Node) handleResponse(context actor.Context) {
 			nodeID:  n.successor.nodeID, //MIGHT CAUSE ISSUES
 		}}, m)
 		fmt.Println("Ready.")
+		//fmt.Println("successor: ", n.successor.name)
+		context.Send(actor.NewPID(n.successor.address, n.successor.name), &Notify{
+			Name:    n.name,
+			Address: n.address,
+			NodeID:  n.nodeID.Text(16),
+		})
 		n.awaitingJoin = false
 	}
 
 	if n.awaitingStabilize && response.ResponseFor == ResponseFor_STABILIZE {
 		//fmt.Println("successor.predecessor = ", response.GetName())
-		fmt.Println("hello")
-		if isBetween(responseNodeInfo.nodeID, n.nodeID, big.NewInt(0).Add(n.successor.nodeID, big.NewInt(1))) {
+		//fmt.Println("[Stabilize] got a response for requestPredecessor: ", responseNodeInfo.name)
+		//succPID := actor.NewPID(n.successor.address, n.successor.name)
+		//big.NewInt(0).Add(n.successor.nodeID, big.NewInt(1))
+		if isBetween(responseNodeInfo.nodeID, n.nodeID, n.successor.nodeID) {
 			n.successor = responseNodeInfo
 			n.fingerTable[0] = n.successor
-			fmt.Printf("Updated successor to <%s>\n", n.successor.name)
-			fmt.Println("hello2")
-
-			rowsToTransfer, err := getRowsInHashRange(n.nodeID.Text(16), n.successor.nodeID.Text(16))
-
-			if err == nil && len(rowsToTransfer) > 0 {
-				fmt.Println("hello3")
-
-				rangeSlice := batchIDs(rowsToTransfer)
-
-				succPID := actor.NewPID(n.successor.address, n.successor.name)
-				n.startDatabaseTransfer(succPID, context, rangeSlice)
-
-				//TODO: implement a way for node to wait until transfer is complete to delet
-				// might require moving the below logic to its own case in handleResponse
-				time.Sleep(500 * time.Millisecond)
-
-				for _, rng := range rangeSlice {
-					deleteDatabaseLines(rng)
-				}
-
-				context.Send(succPID, &Notify{
-					Name:    n.name,
-					Address: n.address,
-					NodeID:  n.nodeID.Text(16),
-				})
-			}
-			
+			succPID := actor.NewPID(n.successor.address, n.successor.name)
+			context.Send(succPID, &Notify{
+				Name:    n.name,
+				Address: n.address,
+				NodeID:  n.nodeID.Text(16),
+			})
+			fmt.Printf("[STABILIZE]: Updated successor to <%s>\n", n.successor.name)
 			if n.predecessor != nil {
 				fmt.Printf("My range: %s - %s\n", n.predecessor.nodeID.Text(16), n.nodeID.Text(16))
 			}
+
+		
+			rowsToTransfer, err := getRowsInHashRange(n.nodeID.Text(16), n.successor.nodeID.Text(16))
+
+			if err == nil && len(rowsToTransfer) > 0 {
+
+				rangeSlice := batchIDs(rowsToTransfer)
+				//fmt.Printf("I have to transfer [%v] to <%s>\n", rangeSlice, n.successor.name)
+				n.startDatabaseTransfer(succPID, context, rangeSlice)
+
+				//TODO: implement a way for node to wait until transfer is complete to delet
+				//might require moving the below logic to its own case in handleResponse
+				//time.Sleep(500 * time.Millisecond)
+
+				// for _, rng := range rangeSlice {
+				// 	deleteDatabaseLines(rng)
+				// }
+				fmt.Println("Done transferring database lines")
+				
+			}
+			
+			
+			
 		}
+		
 		n.awaitingStabilize = false
+		//fmt.Println("[STABILIZE]: finished stabilize")
 	}
 
 	if n.awaitingFixFingers && response.ResponseFor == ResponseFor_FIX_FINGERS {
 		n.fingerTable[n.nextFingerIndex] = responseNodeInfo
-		//fmt.Printf("Fixed finger[%d] = <%s>\n", n.nextFingerIndex, response.GetName())
+
+		//fmt.Printf("[FIX_FINGERS]: Fixed finger[%d]\n", n.nextFingerIndex)
 		n.awaitingFixFingers = false
 	}
 
@@ -248,6 +261,7 @@ func (n *Node) stabilize(context actor.Context) {
 	if n.successor == nil {
 		return
 	}
+	//fmt.Println("[Stabilize]: requesting predecessor of ", n.successor.name)
 	succPID := actor.NewPID(n.successor.address, n.successor.name)
 	n.awaitingStabilize = true
 	context.Request(succPID, &RequestPredecessor{})
@@ -258,13 +272,13 @@ func (n *Node) notify(context actor.Context) {
 	//fmt.Println("Message: ", message)
 	id := new(big.Int)
 	id.SetString(message.GetNodeID(), 16)
-	if n.predecessor == nil || isBetween(id, n.predecessor.nodeID, n.nodeID) {
+	if n.predecessor == nil || n.predecessor.nodeID.Cmp(n.nodeID) == 0 || isBetween(id, n.predecessor.nodeID, n.nodeID) {
 		n.predecessor = &NodeInfo{
 			name:    message.GetName(),
 			address: message.GetAddress(),
 			nodeID:  id,
 		}
-		fmt.Printf("\t->Updated predecessor to <%s>\n", n.predecessor.name)
+		fmt.Printf("[NOTIFY]: Updated predecessor to <%s>\n", n.predecessor.name)
 	}
 }
 
@@ -334,7 +348,7 @@ func consistent_hash(str string) *big.Int {
 	hash := sha1.New()
 	_, err := io.WriteString(hash, str)
 	if err != nil {
-		fmt.Println("[SYSTEM] Error hashing address:", err)
+		fmt.Println("[SYSTEM]: Error hashing address:", err)
 	}
 	result := hash.Sum(nil)
 
@@ -350,17 +364,11 @@ func consistent_hash(str string) *big.Int {
 // used for checking if id x is between (a, b)
 func isBetween(x, a, b *big.Int) bool {
 	//if a < b then check regularly:
-	if b.Cmp(a) == 1 {
-		if x.Cmp(a) == 1 && b.Cmp(x) == 1 {
-			return true
-		}
-	} else {
-		if x.Cmp(a) == 1 || b.Cmp(x) == 1 {
-			return true
-		}
-	}
-
-	return false
+    if b.Cmp(a) == 1 {
+        return x.Cmp(a) == 1 && b.Cmp(x) == 1
+    }
+    // wrap around
+    return x.Cmp(a) == 1 || x.Cmp(b) == -1
 }
 
 func (n *Node) printInfo() {
@@ -382,7 +390,7 @@ func (n *Node) printFingers() {
 func (n *Node) startTransfer(message *StartTransfer, context actor.Context) {
 	// TODO in future: Should this node confirm that the incoming database lines belong to this node?
 	// TODO in future: Should this also include a hash of the file to confirm after?
-
+	fmt.Println("In startTransfer")
 	response := &Response{
 		Name:        n.name,
 		Address:     n.address,
@@ -418,6 +426,7 @@ func (n *Node) startTransfer(message *StartTransfer, context actor.Context) {
 }
 
 func (n *Node) handleFileChunk(message *FileChunk, context actor.Context) {
+	fmt.Println("In handleFileChunk")
 	instance, exists := n.incomingFileTransfers[message.GetFilename()]
 
 	instance.lastTransferTime = time.Now()
@@ -495,8 +504,9 @@ func (n *Node) handleFileChunk(message *FileChunk, context actor.Context) {
 }
 
 func (n *Node) startDatabaseTransfer(peer *actor.PID, context actor.Context, rangeSlice []Range) {
-
+	fmt.Println("In startDatabaseTransfer")
 	// Check to make sure the lines are in the database
+	start := time.Now()
 	for _, rng := range rangeSlice {
 		lineStart := rng.start
 		lineEnd := rng.end
@@ -505,22 +515,35 @@ func (n *Node) startDatabaseTransfer(peer *actor.PID, context actor.Context, ran
 			return
 		}
 	}
+	t := time.Now();
+	fmt.Printf("Loop1 took %vs.\n", t.Sub(start))
 
+
+	start = time.Now()
 	exportName, err := exportDatabaseLines(rangeSlice)
 	if err != nil {
 		return
 	}
+	t = time.Now();
+	fmt.Printf("exportDatabaseLines() took %vs.\n", t.Sub(start))
 
+	start = time.Now()	
 	file, err := openFileRead(exportName)
 	if err != nil {
 		fmt.Println("[SYSTEM] Error opening file:", err)
 		return
 	}
+	t = time.Now();
+	fmt.Printf("openFileRead() took %vs.\n", t.Sub(start))
 
 	var protoRange []*ProtoRange
+	start = time.Now()
 	for _, rng := range rangeSlice {
 		protoRange = append(protoRange, &ProtoRange{Start: int32(rng.start), End: int32(rng.end)})
 	}
+	t = time.Now();
+	fmt.Printf("Loop2 took %vs.\n", t.Sub(start))
+
 
 	transferMessage := &StartTransfer{
 		Filename: exportName,
@@ -545,6 +568,7 @@ func (n *Node) startDatabaseTransfer(peer *actor.PID, context actor.Context, ran
 }
 
 func (n *Node) sendChunk(outTransfer *transfer, context actor.Context) {
+	fmt.Println("In sendChunk")
 	chunkSize := 1024 * 100 // 100kb
 	buffer := make([]byte, chunkSize)
 	chunkMessage := &FileChunk{
@@ -595,4 +619,13 @@ func (n *Node) cleanUpTimedOutTransfers(transfers map[string]*transfer) {
 			delete(transfers, fileName)
 		}
 	}
+}
+
+//ripped from google
+func IntSliceToBytes(ints []int, byteOrder binary.ByteOrder) []byte {
+	bytes := make([]byte, len(ints)*4) // Assuming 4 bytes per int (int32)
+	for i, integer := range ints {
+		byteOrder.PutUint32(bytes[i*4:(i+1)*4], uint32(integer))
+	}
+	return bytes
 }

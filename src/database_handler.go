@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"time"
+	"math/big"
 )
 
 var DB_PATH = "../malware_hashes.db"
@@ -21,6 +22,11 @@ var databaseLines []Range // Used to track which lines this node has in its data
 type Range struct {
 	start int
 	end   int
+}
+
+type BigRange struct {
+	start *big.Int
+	end *big.Int
 }
 
 var CREATE_TABLE_STATEMENT = `CREATE TABLE "malware_hashes" (
@@ -149,6 +155,7 @@ func checkHash(hash string) (string, error) {
 // Call deleteExportDB when finished using the returned database to free up space.
 func exportDatabaseLines(lineSlice []Range) (string, error) {
 	// Check to make sure the ranges are in the database
+
 	for _, rng := range lineSlice {
 		lineStart := rng.start
 		lineEnd := rng.end
@@ -157,7 +164,9 @@ func exportDatabaseLines(lineSlice []Range) (string, error) {
 			return "", errors.New("error: Initiated transfer for line(s) that aren't in the database")
 		}
 	}
-
+	
+	
+	fmt.Println("HII")
 	//Create a filename unique to this node so that nodes can differentiate between other received files.
 	hostname, _ := os.Hostname()
 	pid := os.Getpid()
@@ -267,9 +276,9 @@ WHERE NOT EXISTS (
 
 // Deletes the range (from start to end) of database lines.
 // Returns bool indicating success.
-
+//maybe repurpose to work with 
 func deleteDatabaseLines(delRange Range) bool {
-	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE sha1_hash >= ? AND sha1_hash <= ?", TABLE_NAME)
+	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE ID >= ? AND ID <= ?", TABLE_NAME)
 
 	_, err := db.Exec(deleteQuery, delRange.start, delRange.end)
 	if err != nil {
@@ -306,6 +315,51 @@ func deleteDatabaseLines(delRange Range) bool {
 			databaseLines[index].start = delRange.end + 1
 		}
 	}
+
+	return true
+}
+
+
+func deleteHashes(delRange BigRange) bool {
+	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE sha1_hash >= ? AND sha1_hash <= ?", TABLE_NAME)
+	start := delRange.start.Text(16)
+    end := delRange.end.Text(16)
+	_, err := db.Exec(deleteQuery, start, end)
+
+	if err != nil {
+		log.Printf("[DATABASE] Failed to delete lines from database: %v\n", err.Error())
+		return false
+	}
+
+	// for index := 0; index < len(databaseLines); index++ {
+	// 	rng := databaseLines[index]
+
+	// 	// If delRange is fully within an existing range, split it into two
+	// 	if rng.start < delRange.start && rng.end > delRange.end {
+	// 		// Create a new range for the right-hand side
+	// 		newRange := Range{start: delRange.end + 1, end: rng.end}
+
+	// 		// Adjust the left-side range
+	// 		databaseLines[index].end = delRange.start - 1
+
+	// 		// Insert the new range after the adjusted left range
+	// 		databaseLines = append(databaseLines[:index+1], append([]Range{newRange}, databaseLines[index+1:]...)...)
+	// 	} else if rng.start >= delRange.start && rng.end <= delRange.end {
+	// 		// If it exactly matches or encompasses the range, remove the range
+	// 		databaseLines = append(databaseLines[:index], databaseLines[index+1:]...)
+	// 		index-- // Adjust the index after removal
+	// 	} else if rng.start < delRange.start &&
+	// 		rng.end <= delRange.end && rng.end >= delRange.start {
+	// 		// If the delete range extends past the right side, but still overlaps with the database range.
+	// 		// Trim right side
+	// 		databaseLines[index].end = delRange.start - 1
+	// 	} else if rng.start >= delRange.start && rng.start <= delRange.end &&
+	// 		rng.end > delRange.end {
+	// 		// If the delete range extends past the left side, but still overlaps with the database range.
+	// 		// Trim the left side
+	// 		databaseLines[index].start = delRange.end + 1
+	// 	}
+	// }
 
 	return true
 }
