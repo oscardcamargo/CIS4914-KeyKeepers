@@ -105,7 +105,7 @@ func (n *Node) handleInitialize(parameters *Initialize, context actor.Context) {
 			n.fingerTable[i] = n.successor
 		}
 		n.predecessor = &NodeInfo{name: n.name, address: n.address, nodeID: new(big.Int).Set(n.nodeID)}
-		//dbInit()
+		dbInit()
 		fmt.Println("Ready.")
 	} else {
 		to_join := actor.NewPID(parameters.GetRemoteAddress(), parameters.GetRemoteName())

@@ -8,15 +8,9 @@ message Initialize {
     string name = 1;
     string address = 2;
     string remoteName = 4;
-    string name = 1;
-    string address = 2;
-    string remoteName = 4;
     string remoteAddress = 3;
 }
 
-message StabilizeSelf {}
-
-message FixFingers {}
 message StabilizeSelf {}
 
 message FixFingers {}
@@ -26,8 +20,6 @@ message RequestSuccessor {
   string nodeID = 1;
   ResponseFor responseFor = 2;
 }
-
-message RequestPredecessor {}
 
 message RequestPredecessor {}
 

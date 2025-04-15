@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"time"
+	//"math/big"
 )
 
 var DB_PATH = "../malware_hashes.db"
@@ -17,14 +18,12 @@ var TABLE_NAME = "malware_hashes"
 
 var db *sql.DB
 var databaseLines []Range // Used to track which lines this node has in its database.
-var databaseHashes BigRange
 
 type Range struct {
 	start int
 	end   int
 }
 
-//uses 160-bit hashes for start and end
 type BigRange struct {
 	start string
 	end string
