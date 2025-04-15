@@ -37,6 +37,9 @@ type Node struct {
 	awaitingFixFingers       bool
 	awaitingAcceptConnection bool
 	awaitingChunkReceipt     bool
+	awaitingPredPredForTransfer bool
+	ongoingTransfer bool
+	newPredecessor bool
 
 	//lists of active file transfers. Tracked by file name
 	incomingFileTransfers map[string]*transfer
@@ -89,6 +92,8 @@ func (n *Node) handleInitialize(parameters *Initialize, context actor.Context) {
 	n.awaitingJoin = false
 	n.awaitingAcceptConnection = false
 	n.awaitingChunkReceipt = false
+	n.ongoingTransfer = false
+	n.newPredecessor = false
 	n.incomingFileTransfers = make(map[string]*transfer)
 	n.outgoingFileTransfers = make(map[string]*transfer)
 
@@ -161,56 +166,71 @@ func (n *Node) handleResponse(context actor.Context) {
 	}
 
 	if n.awaitingStabilize && response.ResponseFor == ResponseFor_STABILIZE {
-		//fmt.Println("successor.predecessor = ", response.GetName())
-		//fmt.Println("[Stabilize] got a response for requestPredecessor: ", responseNodeInfo.name)
-		//succPID := actor.NewPID(n.successor.address, n.successor.name)
-		//big.NewInt(0).Add(n.successor.nodeID, big.NewInt(1))
+		var succPID *actor.PID
 		if isBetween(responseNodeInfo.nodeID, n.nodeID, n.successor.nodeID) {
 			n.successor = responseNodeInfo
 			n.fingerTable[0] = n.successor
-			succPID := actor.NewPID(n.successor.address, n.successor.name)
+			succPID = actor.NewPID(n.successor.address, n.successor.name)
 			context.Send(succPID, &Notify{
 				Name:    n.name,
 				Address: n.address,
 				NodeID:  n.nodeID.Text(16),
 			})
 			fmt.Printf("[STABILIZE]: Updated successor to <%s>\n", n.successor.name)
-		}
-		if n.predecessor != nil && n.predecessor.name != n.name {
 			fmt.Printf("My range: %s - %s\n", n.predecessor.nodeID.Text(16), n.nodeID.Text(16))
-			fmt.Println("Deleting the rest...")
 			
-			var minHash, maxHash string
+			if n.predecessor != nil && n.predecessor.nodeID.Cmp(n.nodeID) != 0 {
+				
+				//two node scenario ?
+				if n.successor.nodeID.Cmp(n.predecessor.nodeID) == 0 {
+					// n.nodeID < n.successor.nodeID
+					// send (n.nodeID, n.successor.nodeID) to successor
+					if n.nodeID.Cmp(n.successor.nodeID) == -1 {
+						fmt.Println("Normal case")
+						rows, _:= getRowsInHashRange(big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), n.successor.nodeID.Text(16))
+						batch := batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+					} else if n.nodeID.Cmp(n.successor.nodeID) == 1 {
+						// n.successor.nodeID < n.nodeID
+						// send (n.nodeID, n.successor.nodeID) to successor
+						fmt.Println("Wrap around case")
+						var minHash, maxHash string
+						err := db.QueryRow("SELECT MIN(sha1_hash) FROM " + TABLE_NAME).Scan(&minHash)
+						if err != nil {
+							// handle error
+						}
+						err = db.QueryRow("SELECT MAX(sha1_hash) FROM " + TABLE_NAME).Scan(&maxHash)
+						if err != nil {
+							// handle error
+						}
 
-			err := db.QueryRow("SELECT MIN(sha1_hash) FROM " + TABLE_NAME).Scan(&minHash)
-			if err != nil {
-				// handle error
-			}
-			
-			err = db.QueryRow("SELECT MAX(sha1_hash) FROM " + TABLE_NAME).Scan(&maxHash)
-			if err != nil {
-				// handle error
+						rows, _ := getRowsInHashRange(big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), maxHash)
+						batch := batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+
+						rows, _ = getRowsInHashRange(minHash, n.successor.nodeID.Text(16))
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+					}
+				} else {
+					
+				}
 			}
 
-			fmt.Printf("Min hash: %s\nMax hash: %s\n", minHash, maxHash)
 
-			//predecessor < node
-			if n.predecessor.nodeID.Cmp(n.nodeID) == -1 {
-				fmt.Println("Normal case")
-				startHash := big.NewInt(0).Add(n.nodeID, big.NewInt(1))
-				rng := BigRange{start: startHash.Text(16), end: maxHash}
-				deleteHashes(rng)
-				fmt.Println("Deleted (n.nodeID, max]")
-				rng = BigRange{start: minHash, end: n.predecessor.nodeID.Text(16)}
-				deleteHashes(rng)
-				fmt.Println("Deleted (min, n.predecessor.nodeID)")
-				fmt.Println("DELETED DB LINES!!!!!!")
-			} else {
-				fmt.Println("Fucked case")
-			}
 		}
+		//deleteHashes(BigRange{start: big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), end: n.successor.nodeID.Text(16)})
 		n.awaitingStabilize = false
-		//fmt.Println("[STABILIZE]: finished stabilize")
+	} else if n.awaitingPredPredForTransfer {
+		rows, err := getRowsInHashRange(responseNodeInfo.nodeID.Text(16), n.predecessor.nodeID.Text(16))
+		if err != nil {
+			panic(err)
+		}
+		batch := batchIDs(rows)
+		predPID := actor.NewPID(n.predecessor.address, n.predecessor.name)
+		n.startDatabaseTransfer(predPID, context, batch)
+		fmt.Println("Transferred DB LINES TO PRED!!!!!!")
+		n.awaitingPredPredForTransfer = false
 	}
 
 	if n.awaitingFixFingers && response.ResponseFor == ResponseFor_FIX_FINGERS {
@@ -286,6 +306,7 @@ func (n *Node) notify(context actor.Context) {
 			nodeID:  id,
 		}
 		fmt.Printf("[NOTIFY]: Updated predecessor to <%s>\n", n.predecessor.name)
+		n.newPredecessor = true;
 	}
 }
 

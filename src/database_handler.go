@@ -17,6 +17,7 @@ var TABLE_NAME = "malware_hashes"
 
 var db *sql.DB
 var databaseLines []Range // Used to track which lines this node has in its database.
+var databaseHashes BigRange
 
 type Range struct {
 	start int
@@ -327,9 +328,7 @@ func deleteHashes(delRange BigRange) bool {
 	startHash := delRange.start
     endHash := delRange.end
 
-	fmt.Println("Hi...")
 	_, err := db.Exec(deleteQuery, startHash, endHash)
-	fmt.Println("Bye...")
 	if err != nil {
 		log.Printf("[DATABASE] Failed to delete lines from database: %v\n", err.Error())
 		return false
@@ -437,7 +436,7 @@ func getLineRange() []Range {
 
 //Used for getting the IDs of selected SHA1 hashes
 func getRowsInHashRange(startHash, endHash string) ([]int, error) {
-	query := fmt.Sprintf(`SELECT ID FROM %s WHERE sha1_hash > ? AND sha1_hash <= ?`, TABLE_NAME)
+	query := fmt.Sprintf(`SELECT ID FROM %s WHERE sha1_hash >= ? AND sha1_hash <= ?`, TABLE_NAME)
 
 	rows, err := db.Query(query, startHash, endHash)
 	if err != nil {
