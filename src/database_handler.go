@@ -436,6 +436,7 @@ func getLineRange() []Range {
 
 //Used for getting the IDs of selected SHA1 hashes
 func getRowsInHashRange(startHash, endHash string) ([]int, error) {
+	fmt.Printf("Attempting to send hashes: %s - %s\n", startHash, endHash)
 	query := fmt.Sprintf(`SELECT ID FROM %s WHERE sha1_hash >= ? AND sha1_hash <= ?`, TABLE_NAME)
 
 	rows, err := db.Query(query, startHash, endHash)

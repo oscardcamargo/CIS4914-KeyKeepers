@@ -2,7 +2,7 @@ package main
 
 import (
 	"crypto/sha1"
-	"encoding/binary"
+	//"encoding/binary"
 	"fmt"
 	"github.com/asynkron/protoactor-go/actor"
 	"io"
@@ -178,11 +178,18 @@ func (n *Node) handleResponse(context actor.Context) {
 			})
 			fmt.Printf("[STABILIZE]: Updated successor to <%s>\n", n.successor.name)
 			fmt.Printf("My range: %s - %s\n", n.predecessor.nodeID.Text(16), n.nodeID.Text(16))
-			
-			if n.predecessor != nil && n.predecessor.nodeID.Cmp(n.nodeID) != 0 {
-				
+
+			if n.predecessor != nil && n.predecessor.nodeID.Cmp(n.nodeID) != 0 && !n.ongoingTransfer {
+				n.ongoingTransfer = true
+				var minHash, maxHash string
+				err := db.QueryRow("SELECT MIN(sha1_hash) FROM " + TABLE_NAME).Scan(&minHash)
+				checkError(err)
+				err = db.QueryRow("SELECT MAX(sha1_hash) FROM " + TABLE_NAME).Scan(&maxHash)
+				checkError(err)
+
 				//two node scenario ?
 				if n.successor.nodeID.Cmp(n.predecessor.nodeID) == 0 {
+					fmt.Println("P=S case")
 					// n.nodeID < n.successor.nodeID
 					// send (n.nodeID, n.successor.nodeID) to successor
 					if n.nodeID.Cmp(n.successor.nodeID) == -1 {
@@ -194,15 +201,6 @@ func (n *Node) handleResponse(context actor.Context) {
 						// n.successor.nodeID < n.nodeID
 						// send (n.nodeID, n.successor.nodeID) to successor
 						fmt.Println("Wrap around case")
-						var minHash, maxHash string
-						err := db.QueryRow("SELECT MIN(sha1_hash) FROM " + TABLE_NAME).Scan(&minHash)
-						if err != nil {
-							// handle error
-						}
-						err = db.QueryRow("SELECT MAX(sha1_hash) FROM " + TABLE_NAME).Scan(&maxHash)
-						if err != nil {
-							// handle error
-						}
 
 						rows, _ := getRowsInHashRange(big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), maxHash)
 						batch := batchIDs(rows)
@@ -213,7 +211,57 @@ func (n *Node) handleResponse(context actor.Context) {
 						n.startDatabaseTransfer(succPID, context, batch)
 					}
 				} else {
-					
+					fmt.Println("Unique PNS cases")
+					predPID := actor.NewPID(n.predecessor.address, n.predecessor.name)
+					// case: min < P < N < S < max
+					if n.nodeID.Cmp(n.predecessor.nodeID) == 1 && n.nodeID.Cmp(n.successor.nodeID) == -1 {
+						// send (N, S] to succ
+						rows, err := getRowsInHashRange(big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), maxHash)
+						checkError(err)
+						batch := batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+						//send [min, P] to pred
+						rows, err = getRowsInHashRange(minHash, n.predecessor.nodeID.Text(16))
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(predPID, context, batch)
+						// send (S, max] to pred
+						rows, err = getRowsInHashRange(big.NewInt(0).Add(n.successor.nodeID, big.NewInt(1)).Text(16), maxHash)
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(predPID, context, batch)
+					} else if n.nodeID.Cmp(n.predecessor.nodeID) == 1 && n.predecessor.nodeID.Cmp(n.successor.nodeID) == 1 {
+						// case: min < S < P < N < max
+
+						// send (N, max] to succ
+						rows, err := getRowsInHashRange(big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), maxHash)
+						checkError(err)
+						batch := batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+						// send [min, S] to succ
+						rows, err = getRowsInHashRange(minHash, n.successor.nodeID.Text(16))
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+						// send (S, P] to pred
+						rows, err = getRowsInHashRange(big.NewInt(0).Add(n.successor.nodeID, big.NewInt(1)).Text(16), n.predecessor.nodeID.Text(16))
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(predPID, context, batch)
+					} else if n.nodeID.Cmp(n.successor.nodeID) == -1 && n.successor.nodeID.Cmp(n.predecessor.nodeID) == -1 {
+						// case: min < N < S < P < max
+
+						// send (N, S] to succ
+						rows, err := getRowsInHashRange(big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), n.successor.nodeID.Text(16))
+						checkError(err)
+						batch := batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+						// send (S, P] to pred
+						rows, err = getRowsInHashRange(big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), n.predecessor.nodeID.Text(16))
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(predPID, context, batch)
+					}
 				}
 			}
 
@@ -649,11 +697,8 @@ func (n *Node) cleanUpTimedOutTransfers(transfers map[string]*transfer) {
 	}
 }
 
-//ripped from google
-func IntSliceToBytes(ints []int, byteOrder binary.ByteOrder) []byte {
-	bytes := make([]byte, len(ints)*4) // Assuming 4 bytes per int (int32)
-	for i, integer := range ints {
-		byteOrder.PutUint32(bytes[i*4:(i+1)*4], uint32(integer))
+func checkError(e error) {
+	if e != nil {
+		panic(e)
 	}
-	return bytes
 }
