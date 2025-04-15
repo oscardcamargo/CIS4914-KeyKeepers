@@ -257,7 +257,7 @@ func (n *Node) handleResponse(context actor.Context) {
 						batch := batchIDs(rows)
 						n.startDatabaseTransfer(succPID, context, batch)
 						// send (S, P] to pred
-						rows, err = getRowsInHashRange(big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), n.predecessor.nodeID.Text(16))
+						rows, err = getRowsInHashRange(big.NewInt(0).Add(n.successor.nodeID, big.NewInt(1)).Text(16), n.predecessor.nodeID.Text(16))
 						checkError(err)
 						batch = batchIDs(rows)
 						n.startDatabaseTransfer(predPID, context, batch)
