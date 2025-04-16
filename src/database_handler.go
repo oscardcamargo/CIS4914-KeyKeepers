@@ -75,7 +75,7 @@ func dbInit() {
 
 	// Check that the database exists
 	if _, err := os.Stat(DB_PATH); os.IsNotExist(err) {
-		fmt.Printf("[DATABASE] Database file %v doesn't exist. Creating a new one.", DB_PATH)
+		fmt.Printf("[DATABASE] Database file %v doesn't exist. Creating a new one.\n", DB_PATH)
 		databaseLines = append(databaseLines, Range{start: 0, end: 0})
 
 		_, err = db.Exec(CREATE_TABLE_STATEMENT)
@@ -83,12 +83,30 @@ func dbInit() {
 			log.Fatal("[DATABASE] Failed to create database table on init:", err)
 		}
 	}
-
+	
 	err = db.Ping()
 	if err != nil {
 		log.Fatal("[DATABASE] Failed to connect to local sqlite database:", err)
 	} else {
 		fmt.Println("Successfully connected to local sqlite database.")
+	}
+
+
+	//create the indices
+	indexString := fmt.Sprintf(`CREATE UNIQUE INDEX "index_sha1" ON "%v" ("sha1_hash" ASC);`, TABLE_NAME)
+	_, err = db.Exec(indexString)
+	if err != nil {
+		log.Fatal("[DATABASE] Failed to create and index on the sha1_hash column.")
+	} else {
+		fmt.Println("Successfully created the sha1_hash index.")
+	}
+
+	indexString = fmt.Sprintf(`CREATE UNIQUE INDEX "index_ID" ON "%v" ("ID" ASC);`, TABLE_NAME)
+	_, err = db.Exec(indexString)
+	if err != nil {
+		log.Fatal("[DATABASE] Failed to create and index on the ID column.")
+	} else {
+		fmt.Println("Successfully created the ID index.")
 	}
 
 	getMax := fmt.Sprintf("SELECT MAX(ID) FROM %v", TABLE_NAME)
@@ -500,6 +518,7 @@ func getLineRange() []Range {
 
 //Used for getting the IDs of selected SHA1 hashes
 func getRowsInHashRange(startHash, endHash string) ([]int, error) {
+	fmt.Printf("Attempting to send hashes %s - %s\n", startHash, endHash)
 	query := fmt.Sprintf(`SELECT ID FROM %s WHERE sha1_hash >= ? AND sha1_hash <= ?`, TABLE_NAME)
 
 	rows, err := db.Query(query, startHash, endHash)

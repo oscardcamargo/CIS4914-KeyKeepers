@@ -195,24 +195,27 @@ func (n *Node) handleResponse(context actor.Context) {
 					P: this node's predecessor's ID
 					S: this node's successor's ID 				
 				*/
+				N := big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16) // this is really N + 1
+				P := n.predecessor.nodeID.Text(16)
+				S := n.successor.nodeID.Text(16)
 				if n.successor.nodeID.Cmp(n.predecessor.nodeID) == 0 {
 					// N < S
-					// send (N, S] to successor
 					if n.nodeID.Cmp(n.successor.nodeID) == -1 {
-						fmt.Println("Normal case")
-						rows, _:= getRowsInHashRange(big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), n.successor.nodeID.Text(16))
+						//fmt.Println("Normal case")
+						// send (N, S] to successor
+						rows, _:= getRowsInHashRange(N, S)
 						batch := batchIDs(rows)
 						n.startDatabaseTransfer(succPID, context, batch)
 					} else if n.nodeID.Cmp(n.successor.nodeID) == 1 {
-						// n.successor.nodeID < n.nodeID
-						// send (n.nodeID, n.successor.nodeID) to successor
-						fmt.Println("Wrap around case")
-
-						rows, _ := getRowsInHashRange(big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), maxHash)
+						// S < N
+						//fmt.Println("Wrap around case")
+						// send (N, max] to successor
+						rows, _ := getRowsInHashRange(N, maxHash)
 						batch := batchIDs(rows)
+						
 						n.startDatabaseTransfer(succPID, context, batch)
-
-						rows, _ = getRowsInHashRange(minHash, n.successor.nodeID.Text(16))
+						// send [min, S] to S
+						rows, _ = getRowsInHashRange(minHash, S)
 						batch = batchIDs(rows)
 						n.startDatabaseTransfer(succPID, context, batch)
 					}
@@ -222,17 +225,17 @@ func (n *Node) handleResponse(context actor.Context) {
 					// case: min < P < N < S < max
 					if n.nodeID.Cmp(n.predecessor.nodeID) == 1 && n.nodeID.Cmp(n.successor.nodeID) == -1 {
 						// send (N, S] to succ
-						rows, err := getRowsInHashRange(big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), maxHash)
+						rows, err := getRowsInHashRange(N, S)
 						checkError(err)
 						batch := batchIDs(rows)
 						n.startDatabaseTransfer(succPID, context, batch)
 						//send [min, P] to pred
-						rows, err = getRowsInHashRange(minHash, n.predecessor.nodeID.Text(16))
+						rows, err = getRowsInHashRange(minHash, P)
 						checkError(err)
 						batch = batchIDs(rows)
 						n.startDatabaseTransfer(predPID, context, batch)
 						// send (S, max] to pred
-						rows, err = getRowsInHashRange(big.NewInt(0).Add(n.successor.nodeID, big.NewInt(1)).Text(16), maxHash)
+						rows, err = getRowsInHashRange(S, maxHash)
 						checkError(err)
 						batch = batchIDs(rows)
 						n.startDatabaseTransfer(predPID, context, batch)
@@ -240,17 +243,17 @@ func (n *Node) handleResponse(context actor.Context) {
 						// case: min < S < P < N < max
 
 						// send (N, max] to succ
-						rows, err := getRowsInHashRange(big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), maxHash)
+						rows, err := getRowsInHashRange(N, maxHash)
 						checkError(err)
 						batch := batchIDs(rows)
 						n.startDatabaseTransfer(succPID, context, batch)
 						// send [min, S] to succ
-						rows, err = getRowsInHashRange(minHash, n.successor.nodeID.Text(16))
+						rows, err = getRowsInHashRange(minHash, S)
 						checkError(err)
 						batch = batchIDs(rows)
 						n.startDatabaseTransfer(succPID, context, batch)
 						// send (S, P] to pred
-						rows, err = getRowsInHashRange(big.NewInt(0).Add(n.successor.nodeID, big.NewInt(1)).Text(16), n.predecessor.nodeID.Text(16))
+						rows, err = getRowsInHashRange(S, P)
 						checkError(err)
 						batch = batchIDs(rows)
 						n.startDatabaseTransfer(predPID, context, batch)
@@ -258,12 +261,12 @@ func (n *Node) handleResponse(context actor.Context) {
 						// case: min < N < S < P < max
 
 						// send (N, S] to succ
-						rows, err := getRowsInHashRange(big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), n.successor.nodeID.Text(16))
+						rows, err := getRowsInHashRange(N, S)
 						checkError(err)
 						batch := batchIDs(rows)
 						n.startDatabaseTransfer(succPID, context, batch)
 						// send (S, P] to pred
-						rows, err = getRowsInHashRange(big.NewInt(0).Add(n.successor.nodeID, big.NewInt(1)).Text(16), n.predecessor.nodeID.Text(16))
+						rows, err = getRowsInHashRange(S, P)
 						checkError(err)
 						batch = batchIDs(rows)
 						n.startDatabaseTransfer(predPID, context, batch)
@@ -472,7 +475,6 @@ func (n *Node) printFingers() {
 func (n *Node) startTransfer(message *StartTransfer, context actor.Context) {
 	// TODO in future: Should this node confirm that the incoming database lines belong to this node?
 	// TODO in future: Should this also include a hash of the file to confirm after?
-	fmt.Println("In startTransfer")
 	response := &Response{
 		Name:        n.name,
 		Address:     n.address,
@@ -503,12 +505,11 @@ func (n *Node) startTransfer(message *StartTransfer, context actor.Context) {
 
 	response.Status = Status_OK
 	context.Respond(response)
-
+	fmt.Println("[DEBUG]: The transfer message PID is: ", newFileTransfer.fileName)
 	fmt.Printf("[SYSTEM]: File Transfer request initialized by Address: %v ID:%v \n", context.Sender().Address, context.Sender().Id)
 }
 
 func (n *Node) handleFileChunk(message *FileChunk, context actor.Context) {
-	fmt.Println("In handleFileChunk")
 	instance, exists := n.incomingFileTransfers[message.GetFilename()]
 
 	instance.lastTransferTime = time.Now()
@@ -588,7 +589,6 @@ func (n *Node) handleFileChunk(message *FileChunk, context actor.Context) {
 }
 
 func (n *Node) startDatabaseTransfer(peer *actor.PID, context actor.Context, rangeSlice []Range) {
-	fmt.Println("In startDatabaseTransfer")
 	// Check to make sure the lines are in the database
 	for _, rng := range rangeSlice {
 		lineStart := rng.start
@@ -638,7 +638,6 @@ func (n *Node) startDatabaseTransfer(peer *actor.PID, context actor.Context, ran
 }
 
 func (n *Node) sendChunk(outTransfer *transfer, context actor.Context) {
-	fmt.Println("In sendChunk")
 	chunkSize := 1024 * 100 // 100kb
 	buffer := make([]byte, chunkSize)
 	chunkMessage := &FileChunk{
