@@ -9,7 +9,7 @@ import (
 	"os"
 	"sort"
 	"time"
-	//"math/big"
+	"math/big"
 )
 
 var DB_PATH = "../malware_hashes.db"
@@ -18,6 +18,7 @@ var TABLE_NAME = "malware_hashes"
 
 var db *sql.DB
 var databaseLines []Range // Used to track which lines this node has in its database.
+
 
 type Range struct {
 	start int
@@ -158,7 +159,7 @@ func checkHash(hash string) (string, error) {
 // Call deleteExportDB when finished using the returned database to free up space.
 func exportDatabaseLines(lineSlice []Range) (string, error) {
 	// Check to make sure the ranges are in the database
-
+	fmt.Println("In export...")
 	for _, rng := range lineSlice {
 		lineStart := rng.start
 		lineEnd := rng.end
@@ -207,7 +208,21 @@ func exportDatabaseLines(lineSlice []Range) (string, error) {
 		log.Printf("[DATABASE] Error creating table in destination database: %v\n", err.Error())
 		return "", err
 	}
-
+	// OPTIMIZATION: adjusting pragma settings for faster bulk operations
+	_, err = newDB.Exec("PRAGMA synchronous = OFF;")
+	if err != nil {
+		log.Printf("[DATABASE] Error setting synchronous OFF: %v\n", err)
+	}
+	
+	_, err = newDB.Exec("PRAGMA journal_mode = MEMORY;")
+	if err != nil {
+		log.Printf("[DATABASE] Error setting journal_mode MEMORY: %v\n", err)
+	}
+	// OPTIMIZATION: begin transaction
+	_, err = newDB.Exec("BEGIN TRANSACTION")
+	if err != nil {
+		return "", err
+	}
 	// Copy the range of data into the exported db
 	copyQuery := fmt.Sprintf("INSERT INTO %s SELECT * FROM src.%s WHERE ID >= ? AND ID <= ?", TABLE_NAME, TABLE_NAME)
 	for _, rng := range lineSlice {
@@ -218,12 +233,19 @@ func exportDatabaseLines(lineSlice []Range) (string, error) {
 			return "", err
 		}
 	}
+	// OPTIMIZATION: end transaction & commit
+	_, err = newDB.Exec("COMMIT")
+	if err != nil {
+		return "", err
+	}
 
 	_, err = newDB.Exec(`DETACH DATABASE src`)
 	if err != nil {
 		log.Printf("[DATABASE] Error detaching database: %v\n", err.Error())
 		return "", err
 	}
+
+	fmt.Println("Out export...")
 
 	return newDBFileName, nil
 }
@@ -321,17 +343,60 @@ func deleteDatabaseLines(delRange Range) bool {
 }
 
 
-func deleteHashes(delRange BigRange) bool {
-	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE sha1_hash >= ? AND sha1_hash <= ?", TABLE_NAME)
-
-	startHash := delRange.start
-    endHash := delRange.end
-
-	_, err := db.Exec(deleteQuery, startHash, endHash)
+func deleteOtherHashes(keepRange BigRange) bool {
+	var minHash, maxHash string
+	err := db.QueryRow(fmt.Sprintf("SELECT MIN(sha1_hash) FROM %v", TABLE_NAME)).Scan(&minHash)
 	if err != nil {
-		log.Printf("[DATABASE] Failed to delete lines from database: %v\n", err.Error())
+		log.Printf("[DATABASE] Failed to delete lines from database 0: %v\n", err.Error())
 		return false
 	}
+	err = db.QueryRow(fmt.Sprintf("SELECT MAX(sha1_hash) FROM %v", TABLE_NAME)).Scan(&maxHash)
+	if err != nil {
+		log.Printf("[DATABASE] Failed to delete lines from database 1: %v\n", err.Error())
+		return false
+	}
+
+	// minHashNum := new(big.Int)
+	// minHashNum.SetString(minHash, 16)
+	// maxHashNum := new(big.Int)
+	// maxHashNum.SetString(maxHash, 16)
+	startNum := new(big.Int)
+	startNum.SetString(keepRange.start, 16)
+	endNum := new(big.Int)
+	endNum.SetString(keepRange.end, 16)
+	// goal is to keep (P, N]
+	// keepRange.start = P
+	// keepRange.end = N
+	// P < N
+	if startNum.Cmp(endNum) == -1 {
+		// delete [min, P]
+		deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE sha1_hash >= ? AND sha1_hash <= ?", TABLE_NAME)
+		_, err = db.Exec(deleteQuery, minHash, keepRange.start)
+		if err != nil {
+			log.Printf("[DATABASE] Failed to delete lines from database: %v\n", err.Error())
+			return false
+		}
+		// delete (N, max]
+		deleteQuery = fmt.Sprintf("DELETE FROM %v WHERE sha1_hash > ? AND sha1_hash <= ?", TABLE_NAME)
+		_, err = db.Exec(deleteQuery, keepRange.end, maxHash)
+		if err != nil {
+			log.Printf("[DATABASE] Failed to delete lines from database: %v\n", err.Error())
+			return false
+		}
+	} else if startNum.Cmp(endNum) == 1 {
+		// N < P
+		// delete (N, P]
+		deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE sha1_hash > ? AND sha1_hash <= ?", TABLE_NAME)
+		_, err = db.Exec(deleteQuery, keepRange.end, keepRange.start)
+		if err != nil {
+			log.Printf("[DATABASE] Failed to delete lines from database: %v\n", err.Error())
+			return false
+		}
+	} else {
+		return false;
+	}
+
+	
 
 	// for index := 0; index < len(databaseLines); index++ {
 	// 	rng := databaseLines[index]
@@ -435,7 +500,6 @@ func getLineRange() []Range {
 
 //Used for getting the IDs of selected SHA1 hashes
 func getRowsInHashRange(startHash, endHash string) ([]int, error) {
-	fmt.Printf("Attempting to send hashes: %s - %s\n", startHash, endHash)
 	query := fmt.Sprintf(`SELECT ID FROM %s WHERE sha1_hash >= ? AND sha1_hash <= ?`, TABLE_NAME)
 
 	rows, err := db.Query(query, startHash, endHash)

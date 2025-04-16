@@ -79,6 +79,8 @@ func (n *Node) Receive(context actor.Context) {
 		n.startTransfer(message, context)
 	case *FileChunk:
 		n.handleFileChunk(message, context)
+	case *EndTransfer:
+		n.handleEndTransfer()
 	}
 }
 
@@ -105,7 +107,7 @@ func (n *Node) handleInitialize(parameters *Initialize, context actor.Context) {
 			n.fingerTable[i] = n.successor
 		}
 		n.predecessor = &NodeInfo{name: n.name, address: n.address, nodeID: new(big.Int).Set(n.nodeID)}
-		dbInit()
+		//dbInit()
 		fmt.Println("Ready.")
 	} else {
 		to_join := actor.NewPID(parameters.GetRemoteAddress(), parameters.GetRemoteName())
@@ -187,11 +189,15 @@ func (n *Node) handleResponse(context actor.Context) {
 				err = db.QueryRow("SELECT MAX(sha1_hash) FROM " + TABLE_NAME).Scan(&maxHash)
 				checkError(err)
 
-				//two node scenario ?
+				/*	
+					The following logic will reference these concepts
+					N: this node's ID
+					P: this node's predecessor's ID
+					S: this node's successor's ID 				
+				*/
 				if n.successor.nodeID.Cmp(n.predecessor.nodeID) == 0 {
-					fmt.Println("P=S case")
-					// n.nodeID < n.successor.nodeID
-					// send (n.nodeID, n.successor.nodeID) to successor
+					// N < S
+					// send (N, S] to successor
 					if n.nodeID.Cmp(n.successor.nodeID) == -1 {
 						fmt.Println("Normal case")
 						rows, _:= getRowsInHashRange(big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), n.successor.nodeID.Text(16))
@@ -572,6 +578,8 @@ func (n *Node) handleFileChunk(message *FileChunk, context actor.Context) {
 		delete(n.incomingFileTransfers, message.GetFilename())
 		deleteDB(message.GetFilename())
 		fmt.Printf("[SYSTEM] File Transfer finished successfully from Address: %v ID:%v\n", context.Sender().Address, context.Sender().Id)
+		fmt.Println("Sending EndTransfer to: ", instance.peerPID)
+		context.Send(instance.peerPID, &EndTransfer{})
 		return
 	}
 
@@ -582,7 +590,6 @@ func (n *Node) handleFileChunk(message *FileChunk, context actor.Context) {
 func (n *Node) startDatabaseTransfer(peer *actor.PID, context actor.Context, rangeSlice []Range) {
 	fmt.Println("In startDatabaseTransfer")
 	// Check to make sure the lines are in the database
-	start := time.Now()
 	for _, rng := range rangeSlice {
 		lineStart := rng.start
 		lineEnd := rng.end
@@ -591,35 +598,22 @@ func (n *Node) startDatabaseTransfer(peer *actor.PID, context actor.Context, ran
 			return
 		}
 	}
-	t := time.Now();
-	fmt.Printf("Loop1 took %vs.\n", t.Sub(start))
 
-
-	start = time.Now()
 	exportName, err := exportDatabaseLines(rangeSlice)
 	if err != nil {
 		return
 	}
-	t = time.Now();
-	fmt.Printf("exportDatabaseLines() took %vs.\n", t.Sub(start))
 
-	start = time.Now()	
 	file, err := openFileRead(exportName)
 	if err != nil {
 		fmt.Println("[SYSTEM] Error opening file:", err)
 		return
 	}
-	t = time.Now();
-	fmt.Printf("openFileRead() took %vs.\n", t.Sub(start))
 
 	var protoRange []*ProtoRange
-	start = time.Now()
 	for _, rng := range rangeSlice {
 		protoRange = append(protoRange, &ProtoRange{Start: int32(rng.start), End: int32(rng.end)})
 	}
-	t = time.Now();
-	fmt.Printf("Loop2 took %vs.\n", t.Sub(start))
-
 
 	transferMessage := &StartTransfer{
 		Filename: exportName,
@@ -695,6 +689,13 @@ func (n *Node) cleanUpTimedOutTransfers(transfers map[string]*transfer) {
 			delete(transfers, fileName)
 		}
 	}
+}
+
+func (n *Node) handleEndTransfer() {
+	fmt.Println("handleEndTransfer in da house!!!")
+	keepRange := BigRange{start: n.predecessor.nodeID.Text(16), end: n.nodeID.Text(16)}
+	deleteOtherHashes(keepRange)
+	n.ongoingTransfer = false
 }
 
 func checkError(e error) {
