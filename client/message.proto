@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package main;
+option go_package = ".;main";
+
+enum HashType {
+  sha256 = 0;
+  md5 = 1;
+  sha1 = 2;
+}
+
+message CheckHash {
+  string hash = 1;
+  HashType type = 2;
+}
+
+message HashResult {
+  int32 ID = 1;
+  string first_seen_utc = 2;
+  string sha256_hash = 3;
+  string md5_hash = 4;
+  string sha1_hash = 5;
+  string reporter = 6;
+  string file_name = 7;
+  string file_type_guess = 8;
+  string mime_type = 9;
+  string signature = 10;
+  string clamav = 11;
+  string vtpercent = 12;
+  string imphash = 13;
+  string ssdeep = 14;
+  string tlsh = 15;
+  string alt_name1 = 16;
+  string alt_name2 = 17;
+  string alt_name3 = 18;
+  string alt_name4 = 19;
+  string alt_name5 = 20;
+  string alt_name6 = 21;
+  string alt_name7 = 22;
+  string alt_name8 = 23;
+  string alt_name9 = 24;
+  string alt_name10 = 25;
+  string alt_name11 = 26;
+  string alt_name12 = 27;
+  string alt_name13 = 28;
+}
+
+message hashRequest {
+  string remoteAddress = 1;
+  string remotename = 2;
+  CheckHash request = 3;
+}
