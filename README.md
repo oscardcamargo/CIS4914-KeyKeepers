@@ -104,3 +104,15 @@ go run . 127.0.0.1 8000 Node1
 ```bash
 go run . 127.0.0.1 8001 Node2 127.0.0.1 8000 Node1
 ```
+
+## 📚 References
+
+Dabek, F., Kaashoek, M. F., Karger, D. R., Morris, R. T., & Stoica, I. (2001). *Wide-area cooperative storage with CFS*. Proceedings of the Eighteenth ACM Symposium on Operating Systems Principles. https://pdos.csail.mit.edu/papers/cfs:sosp01/cfs_sosp.pdf
+
+Estenssoro, J. V. (2024). *Malware and virus statistics 2024: The trends you need to know about*. AVG. https://www.avg.com/en/signal/malware-statistics
+
+Hewitt, C. (2015). *Actor model of computation: Scalable robust information systems*. https://arxiv.org/abs/1008.1459
+
+Johnsen, J., Karlsen, L., & Birkeland, S. (2005). *Peer-to-peer networking with BitTorrent*. https://web.cs.ucla.edu/classes/cs217/05BitTorrent.pdf
+
+Stoica, I., Morris, R., Liben-Nowell, D., Karger, D. R., Kaashoek, M. F., Dabek, F., & Balakrishnan, H. (2003). Chord: A scalable peer-to-peer lookup protocol for internet applications. *IEEE/ACM Transactions on Networking, 11*(1), 17–32. https://doi.org/10.1109/TNET.2002.808407
