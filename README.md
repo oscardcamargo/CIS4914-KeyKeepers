@@ -104,3 +104,15 @@ go run . 127.0.0.1 8000 Node1
 ```bash
 go run . 127.0.0.1 8001 Node2 127.0.0.1 8000 Node1
 ```
+
+## 📚 References
+
+[1] J. V. Estenssoro, "Malware and virus statistics 2024: The trends you need to know about," *AVG*, 2024. [Online]. Available: https://www.avg.com/en/signal/malware-statistics
+
+[2] F. Dabek, M. F. Kaashoek, D. R. Karger, R. T. Morris, and I. Stoica, "Wide-area cooperative storage with CFS," in *Proc. 18th ACM Symp. Operating Systems Principles*, 2001. [Online]. Available: https://pdos.csail.mit.edu/papers/cfs:sosp01/cfs_sosp.pdf
+
+[3] C. Hewitt, "Actor model of computation: Scalable robust information systems," *arXiv preprint arXiv:1008.1459*, 2015. [Online]. Available: https://arxiv.org/abs/1008.1459
+
+[4] J. Johnsen, L. Karlsen, and S. Birkeland, "Peer-to-peer networking with BitTorrent," 2005. [Online]. Available: https://web.cs.ucla.edu/classes/cs217/05BitTorrent.pdf
+
+[5] I. Stoica, R. Morris, D. Liben-Nowell, D. R. Karger, M. F. Kaashoek, F. Dabek, and H. Balakrishnan, "Chord: A scalable peer-to-peer lookup protocol for internet applications," *IEEE/ACM Trans. Netw.*, vol. 11, no. 1, pp. 17–32, 2003. [Online]. Available: https://doi.org/10.1109/TNET.2002.808407
