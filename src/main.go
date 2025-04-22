@@ -140,6 +140,16 @@ func main() {
 	fmt.Println("This node's port: ", os.Args[2])
 	fmt.Println("This node's name: ", os.Args[3])
 
+	/*
+		if os.Args[3] != "node0" {
+			fmt.Println("using a diff db path")
+			DB_PATH = "../malware_hashes" + os.Args[3][4:] + ".db"
+		} else {
+			fmt.Println("using default db path")
+		}
+	*/
+	dbInit()
+
 	if len(os.Args) == 7 {
 		fmt.Println("Target hostname: ", os.Args[4])
 		fmt.Println("Target port: ", os.Args[5])
@@ -194,7 +204,7 @@ func main() {
 		var interactable = true
 		// Non-interactable environments (Such as docker containers) will error out if attempting to scanf
 		_, err := fmt.Scanf("%s\n", &command)
-		if err.Error() == "EOF" {
+		if err != nil && err.Error() == "EOF" {
 			interactable = false
 		}
 		for command != "quit" {
@@ -219,9 +229,9 @@ func main() {
 	}()
 
 	for {
-		time.Sleep(2500 * time.Millisecond)
+		time.Sleep(250 * time.Millisecond)
 		system.Root.Send(node_pid, &StabilizeSelf{})
-		time.Sleep(2500 * time.Millisecond)
+		time.Sleep(250 * time.Millisecond)
 		system.Root.Send(node_pid, &FixFingers{})
 	}
 }

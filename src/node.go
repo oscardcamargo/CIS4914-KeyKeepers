@@ -2,10 +2,13 @@ package main
 
 import (
 	"crypto/sha1"
-	"encoding/binary"
+	"database/sql"
+
+	//"encoding/binary"
 	"fmt"
 	"github.com/asynkron/protoactor-go/actor"
 	"io"
+	"math/big"
 	"math/rand/v2"
 	"os"
 	"slices"
@@ -13,29 +16,32 @@ import (
 )
 
 // m-bit identifier space
-const m int = 10
+const m int = 160
 
 type NodeInfo struct {
 	name    string
 	address string
-	nodeID  uint64
+	nodeID  *big.Int
 }
 
 type Node struct {
 	name            string
 	address         string
-	nodeID          uint64     //Chord identifier (a hash)
+	nodeID          *big.Int   //Chord identifier (a hash)
 	nodePID         *actor.PID //Proto.Actor identifier
 	nextFingerIndex int
 	successor       *NodeInfo
 	predecessor     *NodeInfo
 	fingerTable     []*NodeInfo //list of actors at the predetermined locations on the ring
 
-	awaitingJoin             bool
-	awaitingStabilize        bool
-	awaitingFixFingers       bool
-	awaitingAcceptConnection bool
-	awaitingChunkReceipt     bool
+	awaitingJoin                bool
+	awaitingStabilize           bool
+	awaitingFixFingers          bool
+	awaitingAcceptConnection    bool
+	awaitingChunkReceipt        bool
+	awaitingPredPredForTransfer bool
+	ongoingTransfer             bool
+	newPredecessor              bool
 
 	//lists of active file transfers. Tracked by file name
 	incomingFileTransfers map[string]*transfer
@@ -75,6 +81,8 @@ func (n *Node) Receive(context actor.Context) {
 		n.startTransfer(message, context)
 	case *FileChunk:
 		n.handleFileChunk(message, context)
+	case *EndTransfer:
+		n.handleEndTransfer()
 	case *CheckHash:
 		n.checkHash(message, context)
 	default:
@@ -92,14 +100,20 @@ func (n *Node) handleInitialize(parameters *Initialize, context actor.Context) {
 	n.awaitingJoin = false
 	n.awaitingAcceptConnection = false
 	n.awaitingChunkReceipt = false
+	n.ongoingTransfer = false
+	n.newPredecessor = false
 	n.incomingFileTransfers = make(map[string]*transfer)
 	n.outgoingFileTransfers = make(map[string]*transfer)
 
 	//check if first node and do the appropriate stuff
 	if parameters.GetRemoteAddress() == "" && parameters.GetRemoteName() == "" {
-		n.successor = &NodeInfo{name: n.name, address: n.address, nodeID: n.nodeID}
-		n.fingerTable = slices.Repeat([]*NodeInfo{n.successor}, m)
-		n.predecessor = n.successor
+		n.successor = &NodeInfo{name: n.name, address: n.address, nodeID: new(big.Int).Set(n.nodeID)}
+		n.fingerTable = make([]*NodeInfo, m)
+		for i := range n.fingerTable {
+			n.fingerTable[i] = n.successor
+		}
+		n.predecessor = &NodeInfo{name: n.name, address: n.address, nodeID: new(big.Int).Set(n.nodeID)}
+		//dbInit()
 		fmt.Println("Ready.")
 	} else {
 		to_join := actor.NewPID(parameters.GetRemoteAddress(), parameters.GetRemoteName())
@@ -107,7 +121,7 @@ func (n *Node) handleInitialize(parameters *Initialize, context actor.Context) {
 		// dont put anything past here
 	}
 
-	fmt.Println("ID: ", n.nodeID)
+	fmt.Println("ID: ", n.nodeID.Text(16))
 
 }
 
@@ -116,7 +130,7 @@ func (n *Node) handleRequestPredecessor(context actor.Context) {
 		context.Respond(&Response{
 			Name:        n.name,
 			Address:     n.address,
-			NodeID:      n.nodeID,
+			NodeID:      n.nodeID.Text(16),
 			ResponseFor: ResponseFor_STABILIZE,
 		})
 		return
@@ -124,52 +138,199 @@ func (n *Node) handleRequestPredecessor(context actor.Context) {
 	context.Respond(&Response{
 		Name:        n.predecessor.name,
 		Address:     n.predecessor.address,
-		NodeID:      n.predecessor.nodeID,
+		NodeID:      n.predecessor.nodeID.Text(16),
 		ResponseFor: ResponseFor_STABILIZE,
 	})
 }
 
 func (n *Node) handleResponse(context actor.Context) {
 	response := context.Message().(*Response)
+	num := new(big.Int)
+	num.SetString(response.GetNodeID(), 16)
 
-	reponseNodeInfo := &NodeInfo{
+	responseNodeInfo := &NodeInfo{
 		name:    response.GetName(),
 		address: response.GetAddress(),
-		nodeID:  response.GetNodeID(),
+		nodeID:  num,
 	}
 
 	// TODO: Should these confirm if they came from the expected node?
 	if n.awaitingJoin && response.ResponseFor == ResponseFor_JOIN {
 		//finish the join process with the newly acquired successor
-		n.successor = reponseNodeInfo
+		n.successor = responseNodeInfo
 		n.fingerTable = slices.Repeat([]*NodeInfo{{
 			name:    n.successor.name,
 			address: n.successor.address,
-			nodeID:  n.successor.nodeID,
+			nodeID:  n.successor.nodeID, //MIGHT CAUSE ISSUES
 		}}, m)
 		fmt.Println("Ready.")
+		//fmt.Println("successor: ", n.successor.name)
+		context.Send(actor.NewPID(n.successor.address, n.successor.name), &Notify{
+			Name:    n.name,
+			Address: n.address,
+			NodeID:  n.nodeID.Text(16),
+		})
 		n.awaitingJoin = false
 	}
 
 	if n.awaitingStabilize && response.ResponseFor == ResponseFor_STABILIZE {
-		//fmt.Println("successor.predecessor = ", response.GetName())
-		if isBetween(response.GetNodeID(), n.nodeID, n.successor.nodeID) {
-			n.successor = reponseNodeInfo
+		var succPID *actor.PID
+		if response.NodeID != "<nil>" && isBetween(responseNodeInfo.nodeID, n.nodeID, n.successor.nodeID) {
+			n.successor = responseNodeInfo
 			n.fingerTable[0] = n.successor
-			fmt.Printf("\t->Updated successor to <%s>\n", n.successor.name)
+			succPID = actor.NewPID(n.successor.address, n.successor.name)
+			context.Send(succPID, &Notify{
+				Name:    n.name,
+				Address: n.address,
+				NodeID:  n.nodeID.Text(16),
+			})
+			fmt.Printf("[STABILIZE]: Updated successor to <%s>\n", n.successor.name)
+			fmt.Printf("My range: %s - %s\n", n.predecessor.nodeID.Text(16), n.nodeID.Text(16))
 		}
-		succPID := actor.NewPID(n.successor.address, n.successor.name)
-		context.Send(succPID, &Notify{
-			Name:    n.name,
-			Address: n.address,
-			NodeID:  n.nodeID,
-		})
+
+		// If predecessor exists, predecessor isn't itself, and there isn't an ongoing transfer
+		if n.predecessor != nil && n.predecessor.nodeID.Cmp(n.nodeID) != 0 && !n.ongoingTransfer {
+			succPID = actor.NewPID(n.successor.address, n.successor.name)
+			var minHashSQL, maxHashSQL sql.NullString
+			err := db.QueryRow("SELECT MIN(sha1_hash) FROM " + TABLE_NAME).Scan(&minHashSQL)
+			checkError(err)
+			err = db.QueryRow("SELECT MAX(sha1_hash) FROM " + TABLE_NAME).Scan(&maxHashSQL)
+			checkError(err)
+			if !minHashSQL.Valid || !maxHashSQL.Valid {
+				n.awaitingStabilize = false
+				return
+			}
+			minHash := minHashSQL.String
+			maxHash := maxHashSQL.String
+
+			/*
+				The following logic will reference these concepts
+				N: this node's ID
+				P: this node's predecessor's ID
+				S: this node's successor's ID
+			*/
+			//fmt.Printf("This node ID (N): %v\n", n.nodeID.Text(16))
+			//fmt.Printf("Pred node ID (P): %v\n", n.predecessor)
+			//fmt.Printf("Succ node ID (S): %v\n", n.successor)
+			N := big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16) // this is really N + 1
+			P := n.predecessor.nodeID.Text(16)
+			S := n.successor.nodeID.Text(16)
+			var batch []Range
+			if n.successor.nodeID.Cmp(n.predecessor.nodeID) == 0 {
+				// N < S
+				if n.nodeID.Cmp(n.successor.nodeID) == -1 {
+					// send (N, S] to successor
+					rows, _ := getRowsInHashRange(N, S)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+					}
+				} else if n.nodeID.Cmp(n.successor.nodeID) == 1 {
+					// S < N
+					// send (N, max] to successor
+					rows, _ := getRowsInHashRange(N, maxHash)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+					}
+					// send [min, S] to S
+					rows, _ = getRowsInHashRange(minHash, S)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+					}
+				}
+			} else {
+				predPID := actor.NewPID(n.predecessor.address, n.predecessor.name)
+				// case: min < P < N < S < max
+				if n.nodeID.Cmp(n.predecessor.nodeID) == 1 && n.nodeID.Cmp(n.successor.nodeID) == -1 {
+					// send (N, S] to succ
+					rows, err := getRowsInHashRange(N, S)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+					}
+					//send [min, P] to pred
+					rows, err = getRowsInHashRange(minHash, P)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(predPID, context, batch)
+					}
+
+					// send (S, max] to pred
+					rows, err = getRowsInHashRange(S, maxHash)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(predPID, context, batch)
+					}
+				} else if n.nodeID.Cmp(n.predecessor.nodeID) == 1 && n.predecessor.nodeID.Cmp(n.successor.nodeID) == 1 {
+					// case: min < S < P < N < max
+					// send (N, max] to succ
+					rows, err := getRowsInHashRange(N, maxHash)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+					}
+					// send [min, S] to succ
+					rows, err = getRowsInHashRange(minHash, S)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+					}
+					// send (S, P] to pred
+					rows, err = getRowsInHashRange(S, P)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(predPID, context, batch)
+					}
+				} else if n.nodeID.Cmp(n.successor.nodeID) == -1 && n.successor.nodeID.Cmp(n.predecessor.nodeID) == -1 {
+					// case: min < N < S < P < max
+					// send (N, S] to succ
+					rows, err := getRowsInHashRange(N, S)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+					}
+					// send (S, P] to pred
+					rows, err = getRowsInHashRange(S, P)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(predPID, context, batch)
+					}
+				}
+			}
+
+			// TODO: This seems kind of important to have uncommented.
+			//deleteHashes(BigRange{start: big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), end: n.successor.nodeID.Text(16)})
+		}
 		n.awaitingStabilize = false
-	}
+	} /*else if n.awaitingPredPredForTransfer {
+		rows, err := getRowsInHashRange(responseNodeInfo.nodeID.Text(16), n.predecessor.nodeID.Text(16))
+		if err != nil {
+			panic(err)
+		}
+		batch := batchIDs(rows)
+		predPID := actor.NewPID(n.predecessor.address, n.predecessor.name)
+		n.startDatabaseTransfer(predPID, context, batch)
+		fmt.Println("Transferred DB LINES TO PRED!!!!!!")
+		n.awaitingPredPredForTransfer = false
+	}*/
 
 	if n.awaitingFixFingers && response.ResponseFor == ResponseFor_FIX_FINGERS {
-		n.fingerTable[n.nextFingerIndex] = reponseNodeInfo
-		//fmt.Printf("Fixed finger[%d] = <%s>\n", n.nextFingerIndex, response.GetName())
+		n.fingerTable[n.nextFingerIndex] = responseNodeInfo
+
+		//fmt.Printf("[FIX_FINGERS]: Fixed finger[%d]\n", n.nextFingerIndex)
 		n.awaitingFixFingers = false
 	}
 
@@ -212,7 +373,7 @@ func (n *Node) join(toJoin *actor.PID, context actor.Context) {
 	n.predecessor = nil
 	n.awaitingJoin = true
 	message := &RequestSuccessor{
-		NodeID:      n.nodeID,
+		NodeID:      n.nodeID.Text(16),
 		ResponseFor: ResponseFor_JOIN}
 	context.Request(toJoin, message)
 }
@@ -221,6 +382,7 @@ func (n *Node) stabilize(context actor.Context) {
 	if n.successor == nil {
 		return
 	}
+	//fmt.Println("[Stabilize]: requesting predecessor of ", n.successor.name)
 	succPID := actor.NewPID(n.successor.address, n.successor.name)
 	n.awaitingStabilize = true
 	context.Request(succPID, &RequestPredecessor{})
@@ -229,13 +391,16 @@ func (n *Node) stabilize(context actor.Context) {
 func (n *Node) notify(context actor.Context) {
 	message := context.Message().(*Notify)
 	//fmt.Println("Message: ", message)
-	if n.predecessor == nil || isBetween(message.GetNodeID(), n.predecessor.nodeID, n.nodeID) {
+	id := new(big.Int)
+	id.SetString(message.GetNodeID(), 16)
+	if n.predecessor == nil || n.predecessor.nodeID.Cmp(n.nodeID) == 0 || isBetween(id, n.predecessor.nodeID, n.nodeID) {
 		n.predecessor = &NodeInfo{
 			name:    message.GetName(),
 			address: message.GetAddress(),
-			nodeID:  message.GetNodeID(),
+			nodeID:  id,
 		}
-		fmt.Printf("\t->Updated predecessor to <%s>\n", n.predecessor.name)
+		fmt.Printf("[NOTIFY]: Updated predecessor to <%s>\n", n.predecessor.name)
+		n.newPredecessor = true
 	}
 }
 
@@ -244,50 +409,51 @@ func (n *Node) find_successor(message *RequestSuccessor, context actor.Context) 
 	if n.successor == nil { // If there is no successor none of the following functions can work.
 		return
 	}
+
+	id := new(big.Int)
+	id.SetString(message.GetNodeID(), 16)
+
+	succBound := new(big.Int).Add(n.successor.nodeID, big.NewInt(1))
+
 	if n.name == n.successor.name {
 		context.Respond(&Response{
 			Name:        n.successor.name,
 			Address:     n.successor.address,
-			NodeID:      n.successor.nodeID,
+			NodeID:      n.successor.nodeID.Text(16),
 			ResponseFor: message.ResponseFor,
 		})
-	} else if isBetween(message.NodeID, n.nodeID, n.successor.nodeID+1) {
+	} else if isBetween(id, n.nodeID, succBound) {
 		context.Respond(&Response{
 			Name:        n.successor.name,
 			Address:     n.successor.address,
-			NodeID:      n.successor.nodeID,
+			NodeID:      n.successor.nodeID.Text(16),
 			ResponseFor: message.ResponseFor,
 		})
 	} else {
-		u := n.closest_preceeding_node(message.NodeID)
+		u := n.closest_preceeding_node(id)
 		context.Forward(u)
 	}
 }
 
-/*
-=== PSEUDOCODE ===
-n.fix_fingers():
-
-	i = random index > 1 into finger[];
-	finger[i].node = find_successor(finger[i].start);
-
-==================
-Notes:
-* look in handleResponse() for rest of function
-* chord paper uses indices [1, m] -- we use indices [0, m-1]
-* finger[k] = first node succeeding id n + 2^k
-*/
 func (n *Node) fixFingers(context actor.Context) {
 	n.nextFingerIndex = rand.IntN(m) //[0, m)
-	start := (n.nodeID + (1 << n.nextFingerIndex)) % (1 << m)
+
+	shift := new(big.Int).Lsh(big.NewInt(1), uint(n.nextFingerIndex))
+
+	modulo := new(big.Int).Lsh(big.NewInt(1), uint(m))
+
+	start := new(big.Int).Add(n.nodeID, shift)
+	start.Mod(start, modulo)
+
+	//start := (n.nodeID + (1 << n.nextFingerIndex)) % (1 << m)
 	n.awaitingFixFingers = true
 	message := &RequestSuccessor{
-		NodeID:      start,
+		NodeID:      start.Text(16),
 		ResponseFor: ResponseFor_FIX_FINGERS}
 	context.Request(context.Self(), message)
 }
 
-func (n *Node) closest_preceeding_node(id uint64) *actor.PID {
+func (n *Node) closest_preceeding_node(id *big.Int) *actor.PID {
 	for i := m - 1; i >= 0; i-- {
 		if n.fingerTable[i] == nil {
 			break
@@ -299,35 +465,38 @@ func (n *Node) closest_preceeding_node(id uint64) *actor.PID {
 	return n.nodePID
 }
 
-func consistent_hash(str string) uint64 {
+func consistent_hash(str string) *big.Int {
 	hash := sha1.New()
 	_, err := io.WriteString(hash, str)
 	if err != nil {
-		fmt.Println("[SYSTEM] Error hashing address:", err)
+		fmt.Println("[SYSTEM]: Error hashing address:", err)
 	}
 	result := hash.Sum(nil)
-	value := binary.BigEndian.Uint64(result)
-	if m < 64 {
-		// Mask off the upper bits to keep only m bits
-		value = value & ((1 << uint(m)) - 1)
-	}
 
-	return value
+	// value := binary.BigEndian.Uint64(result)
+	// if m < 64 {
+	// 	// Mask off the upper bits to keep only m bits
+	// 	value = value & ((1 << uint(m)) - 1)
+	// }
+
+	return new(big.Int).SetBytes(result)
 }
 
 // used for checking if id x is between (a, b)
-func isBetween(x, a, b uint64) bool {
+func isBetween(x, a, b *big.Int) bool {
 	//if a < b then check regularly:
-	if a < b {
-		return (a < x) && (x < b)
-	} else {
-		return a < x || x < b
+	if b.Cmp(a) == 1 {
+		return x.Cmp(a) == 1 && b.Cmp(x) == 1
 	}
+	// wrap around
+	return x.Cmp(a) == 1 || x.Cmp(b) == -1
 }
 
 func (n *Node) printInfo() {
+
 	fmt.Println("========== INFO ==========")
-	fmt.Printf("Name: %s\nID: %d\nPID: %v\nSuccessor: %s (%d)\nPredecessor: %s (%d)\n", n.name, n.nodeID, n.nodePID, n.successor.name, n.successor.nodeID, n.predecessor.name, n.predecessor.nodeID)
+	fmt.Printf("Name: %s\nID: %s\nPID: %v\nSuccessor: %s (%s)\nPredecessor: %s (%s)\n",
+		n.name, n.nodeID.Text(16), n.nodePID, n.successor.name, n.successor.nodeID.Text(16), n.predecessor.name, n.predecessor.nodeID.Text(16))
 	fmt.Println("==========================")
 }
 
@@ -342,11 +511,10 @@ func (n *Node) printFingers() {
 func (n *Node) startTransfer(message *StartTransfer, context actor.Context) {
 	// TODO in future: Should this node confirm that the incoming database lines belong to this node?
 	// TODO in future: Should this also include a hash of the file to confirm after?
-
 	response := &Response{
 		Name:        n.name,
 		Address:     n.address,
-		NodeID:      n.nodeID,
+		NodeID:      n.nodeID.Text(16),
 		ResponseFor: ResponseFor_START_TRANSFER,
 	}
 
@@ -373,7 +541,7 @@ func (n *Node) startTransfer(message *StartTransfer, context actor.Context) {
 
 	response.Status = Status_OK
 	context.Respond(response)
-
+	fmt.Println("[DEBUG]: The transfer message PID is: ", newFileTransfer.peerPID)
 	fmt.Printf("[SYSTEM]: File Transfer request initialized by Address: %v ID:%v \n", context.Sender().Address, context.Sender().Id)
 }
 
@@ -384,7 +552,7 @@ func (n *Node) handleFileChunk(message *FileChunk, context actor.Context) {
 	response := &Response{
 		Name:        n.name,
 		Address:     n.address,
-		NodeID:      n.nodeID,
+		NodeID:      n.nodeID.Text(16),
 		ResponseFor: ResponseFor_START_TRANSFER,
 	}
 
@@ -445,8 +613,13 @@ func (n *Node) handleFileChunk(message *FileChunk, context actor.Context) {
 		}
 
 		delete(n.incomingFileTransfers, message.GetFilename())
-		deleteDB(message.GetFilename())
+		//deleteDB(message.GetFilename())
 		fmt.Printf("[SYSTEM] File Transfer finished successfully from Address: %v ID:%v\n", context.Sender().Address, context.Sender().Id)
+		fmt.Println("Sending EndTransfer to: ", instance.peerPID)
+		context.Send(instance.peerPID, &EndTransfer{})
+		if len(n.incomingFileTransfers) == 0 {
+			n.ongoingTransfer = false
+		}
 		return
 	}
 
@@ -455,7 +628,6 @@ func (n *Node) handleFileChunk(message *FileChunk, context actor.Context) {
 }
 
 func (n *Node) startDatabaseTransfer(peer *actor.PID, context actor.Context, rangeSlice []Range) {
-
 	// Check to make sure the lines are in the database
 	for _, rng := range rangeSlice {
 		lineStart := rng.start
@@ -557,6 +729,26 @@ func (n *Node) cleanUpTimedOutTransfers(transfers map[string]*transfer) {
 	}
 }
 
+func (n *Node) handleEndTransfer() {
+	fmt.Println("handleEndTransfer in da house!!!")
+	keepRange := BigRange{start: n.predecessor.nodeID.Text(16), end: n.nodeID.Text(16)}
+	deleteOtherHashes(keepRange)
+	n.ongoingTransfer = false
+}
+
+func checkError(e error) {
+	if e != nil {
+		panic(e)
+	}
+}
+
+func (n *Node) checkRowsPresent(rows []int) bool {
+	if len(rows) != 0 {
+		n.ongoingTransfer = true
+		return true
+	}
+	return false
+  
 func (n *Node) checkHash(hashMsg *CheckHash, context actor.Context) {
 	hashResult, err := checkHash(hashMsg.Hash)
 	if err != nil {

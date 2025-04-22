@@ -6,6 +6,7 @@ import (
 	"fmt"
 	_ "github.com/mattn/go-sqlite3"
 	"log"
+	"math/big"
 	"os"
 	"sort"
 	"time"
@@ -21,6 +22,11 @@ var databaseLines []Range // Used to track which lines this node has in its data
 type Range struct {
 	start int
 	end   int
+}
+
+type BigRange struct {
+	start string
+	end   string
 }
 
 var CREATE_TABLE_STATEMENT = `CREATE TABLE "malware_hashes" (
@@ -54,7 +60,9 @@ var CREATE_TABLE_STATEMENT = `CREATE TABLE "malware_hashes" (
     "alt_name13" TEXT
 );`
 
-func init() {
+// TODO: implement a way for the first node to get the full db and subsequent nodes to create empty dbs
+// configuration flag argument?
+func dbInit() {
 	var err error
 
 	//Open SQLite database
@@ -65,7 +73,7 @@ func init() {
 
 	// Check that the database exists
 	if _, err := os.Stat(DB_PATH); os.IsNotExist(err) {
-		fmt.Printf("[DATABASE] Database file %v doesn't exist. Creating a new one.", DB_PATH)
+		fmt.Printf("[DATABASE] Database file %v doesn't exist. Creating a new one.\n", DB_PATH)
 		databaseLines = append(databaseLines, Range{start: 0, end: 0})
 
 		_, err = db.Exec(CREATE_TABLE_STATEMENT)
@@ -79,6 +87,23 @@ func init() {
 		log.Fatal("[DATABASE] Failed to connect to local sqlite database:", err)
 	} else {
 		fmt.Println("Successfully connected to local sqlite database.")
+	}
+
+	//create the indices
+	indexString := fmt.Sprintf(`CREATE UNIQUE INDEX "index_sha1" ON "%v" ("sha1_hash" ASC);`, TABLE_NAME)
+	_, err = db.Exec(indexString)
+	if err != nil {
+		log.Fatal("[DATABASE] Failed to create an index on the sha1_hash column: ", err)
+	} else {
+		fmt.Println("Successfully created the sha1_hash index.")
+	}
+
+	indexString = fmt.Sprintf(`CREATE UNIQUE INDEX "index_ID" ON "%v" ("ID" ASC);`, TABLE_NAME)
+	_, err = db.Exec(indexString)
+	if err != nil {
+		log.Fatal("[DATABASE] Failed to create and index on the ID column.")
+	} else {
+		fmt.Println("Successfully created the ID index.")
 	}
 
 	getMax := fmt.Sprintf("SELECT MAX(ID) FROM %v", TABLE_NAME)
@@ -157,6 +182,7 @@ func checkHash(hash string) (*HashResult, error) {
 // Call deleteExportDB when finished using the returned database to free up space.
 func exportDatabaseLines(lineSlice []Range) (string, error) {
 	// Check to make sure the ranges are in the database
+	fmt.Println("In export...")
 	for _, rng := range lineSlice {
 		lineStart := rng.start
 		lineEnd := rng.end
@@ -169,7 +195,7 @@ func exportDatabaseLines(lineSlice []Range) (string, error) {
 	//Create a filename unique to this node so that nodes can differentiate between other received files.
 	hostname, _ := os.Hostname()
 	pid := os.Getpid()
-	newDBFileName := fmt.Sprintf("data_set_segment_%s_%d_%d.db", hostname, pid, time.Now().Unix())
+	newDBFileName := fmt.Sprintf("data_set_segment_%s_%d_%d.db", hostname, pid, time.Now().UnixNano())
 
 	var err error
 	newDB, err := sql.Open("sqlite3", DB_FOLDER+newDBFileName)
@@ -205,7 +231,21 @@ func exportDatabaseLines(lineSlice []Range) (string, error) {
 		log.Printf("[DATABASE] Error creating table in destination database: %v\n", err.Error())
 		return "", err
 	}
+	// OPTIMIZATION: adjusting pragma settings for faster bulk operations
+	_, err = newDB.Exec("PRAGMA synchronous = OFF;")
+	if err != nil {
+		log.Printf("[DATABASE] Error setting synchronous OFF: %v\n", err)
+	}
 
+	_, err = newDB.Exec("PRAGMA journal_mode = MEMORY;")
+	if err != nil {
+		log.Printf("[DATABASE] Error setting journal_mode MEMORY: %v\n", err)
+	}
+	// OPTIMIZATION: begin transaction
+	_, err = newDB.Exec("BEGIN TRANSACTION")
+	if err != nil {
+		return "", err
+	}
 	// Copy the range of data into the exported db
 	copyQuery := fmt.Sprintf("INSERT INTO %s SELECT * FROM src.%s WHERE ID >= ? AND ID <= ?", TABLE_NAME, TABLE_NAME)
 	for _, rng := range lineSlice {
@@ -216,12 +256,19 @@ func exportDatabaseLines(lineSlice []Range) (string, error) {
 			return "", err
 		}
 	}
+	// OPTIMIZATION: end transaction & commit
+	_, err = newDB.Exec("COMMIT")
+	if err != nil {
+		return "", err
+	}
 
 	_, err = newDB.Exec(`DETACH DATABASE src`)
 	if err != nil {
 		log.Printf("[DATABASE] Error detaching database: %v\n", err.Error())
 		return "", err
 	}
+
+	fmt.Println("Out export...")
 
 	return newDBFileName, nil
 }
@@ -275,7 +322,7 @@ WHERE NOT EXISTS (
 
 // Deletes the range (from start to end) of database lines.
 // Returns bool indicating success.
-
+// maybe repurpose to work with
 func deleteDatabaseLines(delRange Range) bool {
 	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE ID >= ? AND ID <= ?", TABLE_NAME)
 
@@ -314,6 +361,92 @@ func deleteDatabaseLines(delRange Range) bool {
 			databaseLines[index].start = delRange.end + 1
 		}
 	}
+
+	return true
+}
+
+func deleteOtherHashes(keepRange BigRange) bool {
+	var minHash, maxHash string
+	err := db.QueryRow(fmt.Sprintf("SELECT MIN(sha1_hash) FROM %v", TABLE_NAME)).Scan(&minHash)
+	if err != nil {
+		log.Printf("[DATABASE] Failed to delete lines from database 0: %v\n", err.Error())
+		return false
+	}
+	err = db.QueryRow(fmt.Sprintf("SELECT MAX(sha1_hash) FROM %v", TABLE_NAME)).Scan(&maxHash)
+	if err != nil {
+		log.Printf("[DATABASE] Failed to delete lines from database 1: %v\n", err.Error())
+		return false
+	}
+
+	// minHashNum := new(big.Int)
+	// minHashNum.SetString(minHash, 16)
+	// maxHashNum := new(big.Int)
+	// maxHashNum.SetString(maxHash, 16)
+	startNum := new(big.Int)
+	startNum.SetString(keepRange.start, 16)
+	endNum := new(big.Int)
+	endNum.SetString(keepRange.end, 16)
+	// goal is to keep (P, N]
+	// keepRange.start = P
+	// keepRange.end = N
+	// P < N
+	if startNum.Cmp(endNum) == -1 {
+		// delete [min, P]
+		deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE sha1_hash >= ? AND sha1_hash <= ?", TABLE_NAME)
+		_, err = db.Exec(deleteQuery, minHash, keepRange.start)
+		if err != nil {
+			log.Printf("[DATABASE] Failed to delete lines from database: %v\n", err.Error())
+			return false
+		}
+		// delete (N, max]
+		deleteQuery = fmt.Sprintf("DELETE FROM %v WHERE sha1_hash > ? AND sha1_hash <= ?", TABLE_NAME)
+		_, err = db.Exec(deleteQuery, keepRange.end, maxHash)
+		if err != nil {
+			log.Printf("[DATABASE] Failed to delete lines from database: %v\n", err.Error())
+			return false
+		}
+	} else if startNum.Cmp(endNum) == 1 {
+		// N < P
+		// delete (N, P]
+		deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE sha1_hash > ? AND sha1_hash <= ?", TABLE_NAME)
+		_, err = db.Exec(deleteQuery, keepRange.end, keepRange.start)
+		if err != nil {
+			log.Printf("[DATABASE] Failed to delete lines from database: %v\n", err.Error())
+			return false
+		}
+	} else {
+		return false
+	}
+
+	// for index := 0; index < len(databaseLines); index++ {
+	// 	rng := databaseLines[index]
+
+	// 	// If delRange is fully within an existing range, split it into two
+	// 	if rng.start < delRange.start && rng.end > delRange.end {
+	// 		// Create a new range for the right-hand side
+	// 		newRange := Range{start: delRange.end + 1, end: rng.end}
+
+	// 		// Adjust the left-side range
+	// 		databaseLines[index].end = delRange.start - 1
+
+	// 		// Insert the new range after the adjusted left range
+	// 		databaseLines = append(databaseLines[:index+1], append([]Range{newRange}, databaseLines[index+1:]...)...)
+	// 	} else if rng.start >= delRange.start && rng.end <= delRange.end {
+	// 		// If it exactly matches or encompasses the range, remove the range
+	// 		databaseLines = append(databaseLines[:index], databaseLines[index+1:]...)
+	// 		index-- // Adjust the index after removal
+	// 	} else if rng.start < delRange.start &&
+	// 		rng.end <= delRange.end && rng.end >= delRange.start {
+	// 		// If the delete range extends past the right side, but still overlaps with the database range.
+	// 		// Trim right side
+	// 		databaseLines[index].end = delRange.start - 1
+	// 	} else if rng.start >= delRange.start && rng.start <= delRange.end &&
+	// 		rng.end > delRange.end {
+	// 		// If the delete range extends past the left side, but still overlaps with the database range.
+	// 		// Trim the left side
+	// 		databaseLines[index].start = delRange.end + 1
+	// 	}
+	// }
 
 	return true
 }
@@ -383,4 +516,55 @@ func closeDB(thisDB *sql.DB) {
 // Returns a slice of database lines.
 func getLineRange() []Range {
 	return databaseLines
+}
+
+// Used for getting the IDs of selected SHA1 hashes
+func getRowsInHashRange(startHash, endHash string) ([]int, error) {
+	//fmt.Printf("Attempting to send hashes %s - %s\n", startHash, endHash)
+	query := fmt.Sprintf(`SELECT ID FROM %s WHERE sha1_hash >= ? AND sha1_hash <= ?`, TABLE_NAME)
+
+	rows, err := db.Query(query, startHash, endHash)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+
+	return ids, nil
+}
+
+// Used for batching adjacent IDs based on selected SHA1 hashes
+func batchIDs(ids []int) []Range {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	sort.Ints(ids) // Ensure IDs are sorted.
+
+	var ranges []Range
+	start := ids[0]
+	end := ids[0]
+
+	for i := 1; i < len(ids); i++ {
+		if ids[i] == end+1 {
+			// Adjacent ID, extend the current range
+			end = ids[i]
+		} else {
+			// Non-adjacent, save previous range and start new one
+			ranges = append(ranges, Range{start: start, end: end})
+			start, end = ids[i], ids[i]
+		}
+	}
+
+	// Append the final range
+	ranges = append(ranges, Range{start: start, end: end})
+	return ranges
 }
