@@ -144,14 +144,15 @@ func main() {
 	fmt.Println("This node's port: ", os.Args[2])
 	fmt.Println("This node's name: ", os.Args[3])
 
-	if os.Args[3] != "node0" {
-		fmt.Println("using a diff db path")
-		DB_PATH = "../malware_hashes" + os.Args[3][4:] + ".db"
-	} else {
-		fmt.Println("using default db path")
-	}
+	/*
+		if os.Args[3] != "node0" {
+			fmt.Println("using a diff db path")
+			DB_PATH = "../malware_hashes" + os.Args[3][4:] + ".db"
+		} else {
+			fmt.Println("using default db path")
+		}
+	*/
 	dbInit()
-
 
 	if len(os.Args) == 7 {
 		fmt.Println("Target hostname: ", os.Args[4])

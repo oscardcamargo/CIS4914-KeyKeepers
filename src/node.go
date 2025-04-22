@@ -2,12 +2,14 @@ package main
 
 import (
 	"crypto/sha1"
+	"database/sql"
+
 	//"encoding/binary"
 	"fmt"
 	"github.com/asynkron/protoactor-go/actor"
 	"io"
-	"math/rand/v2"
 	"math/big"
+	"math/rand/v2"
 	"os"
 	"slices"
 	"time"
@@ -25,21 +27,21 @@ type NodeInfo struct {
 type Node struct {
 	name            string
 	address         string
-	nodeID          *big.Int     //Chord identifier (a hash)
+	nodeID          *big.Int   //Chord identifier (a hash)
 	nodePID         *actor.PID //Proto.Actor identifier
 	nextFingerIndex int
 	successor       *NodeInfo
 	predecessor     *NodeInfo
 	fingerTable     []*NodeInfo //list of actors at the predetermined locations on the ring
 
-	awaitingJoin             bool
-	awaitingStabilize        bool
-	awaitingFixFingers       bool
-	awaitingAcceptConnection bool
-	awaitingChunkReceipt     bool
+	awaitingJoin                bool
+	awaitingStabilize           bool
+	awaitingFixFingers          bool
+	awaitingAcceptConnection    bool
+	awaitingChunkReceipt        bool
 	awaitingPredPredForTransfer bool
-	ongoingTransfer bool
-	newPredecessor bool
+	ongoingTransfer             bool
+	newPredecessor              bool
 
 	//lists of active file transfers. Tracked by file name
 	incomingFileTransfers map[string]*transfer
@@ -169,7 +171,7 @@ func (n *Node) handleResponse(context actor.Context) {
 
 	if n.awaitingStabilize && response.ResponseFor == ResponseFor_STABILIZE {
 		var succPID *actor.PID
-		if isBetween(responseNodeInfo.nodeID, n.nodeID, n.successor.nodeID) {
+		if response.NodeID != "<nil>" && isBetween(responseNodeInfo.nodeID, n.nodeID, n.successor.nodeID) {
 			n.successor = responseNodeInfo
 			n.fingerTable[0] = n.successor
 			succPID = actor.NewPID(n.successor.address, n.successor.name)
@@ -180,93 +182,124 @@ func (n *Node) handleResponse(context actor.Context) {
 			})
 			fmt.Printf("[STABILIZE]: Updated successor to <%s>\n", n.successor.name)
 			fmt.Printf("My range: %s - %s\n", n.predecessor.nodeID.Text(16), n.nodeID.Text(16))
+		}
 
-			if n.predecessor != nil && n.predecessor.nodeID.Cmp(n.nodeID) != 0 && !n.ongoingTransfer {
-				n.ongoingTransfer = true
-				var minHash, maxHash string
-				err := db.QueryRow("SELECT MIN(sha1_hash) FROM " + TABLE_NAME).Scan(&minHash)
-				checkError(err)
-				err = db.QueryRow("SELECT MAX(sha1_hash) FROM " + TABLE_NAME).Scan(&maxHash)
-				checkError(err)
+		// If predecessor exists, predecessor isn't itself, and there isn't an ongoing transfer
+		if n.predecessor != nil && n.predecessor.nodeID.Cmp(n.nodeID) != 0 && !n.ongoingTransfer {
+			succPID = actor.NewPID(n.successor.address, n.successor.name)
+			var minHashSQL, maxHashSQL sql.NullString
+			err := db.QueryRow("SELECT MIN(sha1_hash) FROM " + TABLE_NAME).Scan(&minHashSQL)
+			checkError(err)
+			err = db.QueryRow("SELECT MAX(sha1_hash) FROM " + TABLE_NAME).Scan(&maxHashSQL)
+			checkError(err)
+			if !minHashSQL.Valid || !maxHashSQL.Valid {
+				n.awaitingStabilize = false
+				return
+			}
+			minHash := minHashSQL.String
+			maxHash := maxHashSQL.String
 
-				/*	
-					The following logic will reference these concepts
-					N: this node's ID
-					P: this node's predecessor's ID
-					S: this node's successor's ID 				
-				*/
-				N := big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16) // this is really N + 1
-				P := n.predecessor.nodeID.Text(16)
-				S := n.successor.nodeID.Text(16)
-				if n.successor.nodeID.Cmp(n.predecessor.nodeID) == 0 {
-					// N < S
-					if n.nodeID.Cmp(n.successor.nodeID) == -1 {
-						//fmt.Println("Normal case")
-						// send (N, S] to successor
-						rows, _:= getRowsInHashRange(N, S)
-						batch := batchIDs(rows)
-						n.startDatabaseTransfer(succPID, context, batch)
-					} else if n.nodeID.Cmp(n.successor.nodeID) == 1 {
-						// S < N
-						//fmt.Println("Wrap around case")
-						// send (N, max] to successor
-						rows, _ := getRowsInHashRange(N, maxHash)
-						batch := batchIDs(rows)
-						
-						n.startDatabaseTransfer(succPID, context, batch)
-						// send [min, S] to S
-						rows, _ = getRowsInHashRange(minHash, S)
+			/*
+				The following logic will reference these concepts
+				N: this node's ID
+				P: this node's predecessor's ID
+				S: this node's successor's ID
+			*/
+			//fmt.Printf("This node ID (N): %v\n", n.nodeID.Text(16))
+			//fmt.Printf("Pred node ID (P): %v\n", n.predecessor)
+			//fmt.Printf("Succ node ID (S): %v\n", n.successor)
+			N := big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16) // this is really N + 1
+			P := n.predecessor.nodeID.Text(16)
+			S := n.successor.nodeID.Text(16)
+			var batch []Range
+			if n.successor.nodeID.Cmp(n.predecessor.nodeID) == 0 {
+				// N < S
+				if n.nodeID.Cmp(n.successor.nodeID) == -1 {
+					// send (N, S] to successor
+					rows, _ := getRowsInHashRange(N, S)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
 						batch = batchIDs(rows)
 						n.startDatabaseTransfer(succPID, context, batch)
 					}
-				} else {
-					fmt.Println("Unique PNS cases")
-					predPID := actor.NewPID(n.predecessor.address, n.predecessor.name)
-					// case: min < P < N < S < max
-					if n.nodeID.Cmp(n.predecessor.nodeID) == 1 && n.nodeID.Cmp(n.successor.nodeID) == -1 {
-						// send (N, S] to succ
-						rows, err := getRowsInHashRange(N, S)
+				} else if n.nodeID.Cmp(n.successor.nodeID) == 1 {
+					// S < N
+					// send (N, max] to successor
+					rows, _ := getRowsInHashRange(N, maxHash)
+					if n.checkRowsPresent(rows) {
 						checkError(err)
-						batch := batchIDs(rows)
+						batch = batchIDs(rows)
 						n.startDatabaseTransfer(succPID, context, batch)
-						//send [min, P] to pred
-						rows, err = getRowsInHashRange(minHash, P)
+					}
+					// send [min, S] to S
+					rows, _ = getRowsInHashRange(minHash, S)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+					}
+				}
+			} else {
+				predPID := actor.NewPID(n.predecessor.address, n.predecessor.name)
+				// case: min < P < N < S < max
+				if n.nodeID.Cmp(n.predecessor.nodeID) == 1 && n.nodeID.Cmp(n.successor.nodeID) == -1 {
+					// send (N, S] to succ
+					rows, err := getRowsInHashRange(N, S)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+					}
+					//send [min, P] to pred
+					rows, err = getRowsInHashRange(minHash, P)
+					if n.checkRowsPresent(rows) {
 						checkError(err)
 						batch = batchIDs(rows)
 						n.startDatabaseTransfer(predPID, context, batch)
-						// send (S, max] to pred
-						rows, err = getRowsInHashRange(S, maxHash)
-						checkError(err)
-						batch = batchIDs(rows)
-						n.startDatabaseTransfer(predPID, context, batch)
-					} else if n.nodeID.Cmp(n.predecessor.nodeID) == 1 && n.predecessor.nodeID.Cmp(n.successor.nodeID) == 1 {
-						// case: min < S < P < N < max
+					}
 
-						// send (N, max] to succ
-						rows, err := getRowsInHashRange(N, maxHash)
-						checkError(err)
-						batch := batchIDs(rows)
-						n.startDatabaseTransfer(succPID, context, batch)
-						// send [min, S] to succ
-						rows, err = getRowsInHashRange(minHash, S)
-						checkError(err)
-						batch = batchIDs(rows)
-						n.startDatabaseTransfer(succPID, context, batch)
-						// send (S, P] to pred
-						rows, err = getRowsInHashRange(S, P)
+					// send (S, max] to pred
+					rows, err = getRowsInHashRange(S, maxHash)
+					if n.checkRowsPresent(rows) {
 						checkError(err)
 						batch = batchIDs(rows)
 						n.startDatabaseTransfer(predPID, context, batch)
-					} else if n.nodeID.Cmp(n.successor.nodeID) == -1 && n.successor.nodeID.Cmp(n.predecessor.nodeID) == -1 {
-						// case: min < N < S < P < max
-
-						// send (N, S] to succ
-						rows, err := getRowsInHashRange(N, S)
+					}
+				} else if n.nodeID.Cmp(n.predecessor.nodeID) == 1 && n.predecessor.nodeID.Cmp(n.successor.nodeID) == 1 {
+					// case: min < S < P < N < max
+					// send (N, max] to succ
+					rows, err := getRowsInHashRange(N, maxHash)
+					if n.checkRowsPresent(rows) {
 						checkError(err)
-						batch := batchIDs(rows)
+						batch = batchIDs(rows)
 						n.startDatabaseTransfer(succPID, context, batch)
-						// send (S, P] to pred
-						rows, err = getRowsInHashRange(S, P)
+					}
+					// send [min, S] to succ
+					rows, err = getRowsInHashRange(minHash, S)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+					}
+					// send (S, P] to pred
+					rows, err = getRowsInHashRange(S, P)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(predPID, context, batch)
+					}
+				} else if n.nodeID.Cmp(n.successor.nodeID) == -1 && n.successor.nodeID.Cmp(n.predecessor.nodeID) == -1 {
+					// case: min < N < S < P < max
+					// send (N, S] to succ
+					rows, err := getRowsInHashRange(N, S)
+					if n.checkRowsPresent(rows) {
+						checkError(err)
+						batch = batchIDs(rows)
+						n.startDatabaseTransfer(succPID, context, batch)
+					}
+					// send (S, P] to pred
+					rows, err = getRowsInHashRange(S, P)
+					if n.checkRowsPresent(rows) {
 						checkError(err)
 						batch = batchIDs(rows)
 						n.startDatabaseTransfer(predPID, context, batch)
@@ -274,11 +307,11 @@ func (n *Node) handleResponse(context actor.Context) {
 				}
 			}
 
-
+			// TODO: This seems kind of important to have uncommented.
+			//deleteHashes(BigRange{start: big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), end: n.successor.nodeID.Text(16)})
 		}
-		//deleteHashes(BigRange{start: big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), end: n.successor.nodeID.Text(16)})
 		n.awaitingStabilize = false
-	} else if n.awaitingPredPredForTransfer {
+	} /*else if n.awaitingPredPredForTransfer {
 		rows, err := getRowsInHashRange(responseNodeInfo.nodeID.Text(16), n.predecessor.nodeID.Text(16))
 		if err != nil {
 			panic(err)
@@ -288,7 +321,7 @@ func (n *Node) handleResponse(context actor.Context) {
 		n.startDatabaseTransfer(predPID, context, batch)
 		fmt.Println("Transferred DB LINES TO PRED!!!!!!")
 		n.awaitingPredPredForTransfer = false
-	}
+	}*/
 
 	if n.awaitingFixFingers && response.ResponseFor == ResponseFor_FIX_FINGERS {
 		n.fingerTable[n.nextFingerIndex] = responseNodeInfo
@@ -363,7 +396,7 @@ func (n *Node) notify(context actor.Context) {
 			nodeID:  id,
 		}
 		fmt.Printf("[NOTIFY]: Updated predecessor to <%s>\n", n.predecessor.name)
-		n.newPredecessor = true;
+		n.newPredecessor = true
 	}
 }
 
@@ -397,7 +430,6 @@ func (n *Node) find_successor(message *RequestSuccessor, context actor.Context) 
 		context.Forward(u)
 	}
 }
-
 
 func (n *Node) fixFingers(context actor.Context) {
 	n.nextFingerIndex = rand.IntN(m) //[0, m)
@@ -449,18 +481,18 @@ func consistent_hash(str string) *big.Int {
 // used for checking if id x is between (a, b)
 func isBetween(x, a, b *big.Int) bool {
 	//if a < b then check regularly:
-    if b.Cmp(a) == 1 {
-        return x.Cmp(a) == 1 && b.Cmp(x) == 1
-    }
-    // wrap around
-    return x.Cmp(a) == 1 || x.Cmp(b) == -1
+	if b.Cmp(a) == 1 {
+		return x.Cmp(a) == 1 && b.Cmp(x) == 1
+	}
+	// wrap around
+	return x.Cmp(a) == 1 || x.Cmp(b) == -1
 }
 
 func (n *Node) printInfo() {
-	
+
 	fmt.Println("========== INFO ==========")
-	fmt.Printf("Name: %s\nID: %s\nPID: %v\nSuccessor: %s (%s)\nPredecessor: %s (%s)\n", 
-	n.name, n.nodeID.Text(16), n.nodePID, n.successor.name, n.successor.nodeID.Text(16), n.predecessor.name, n.predecessor.nodeID.Text(16))
+	fmt.Printf("Name: %s\nID: %s\nPID: %v\nSuccessor: %s (%s)\nPredecessor: %s (%s)\n",
+		n.name, n.nodeID.Text(16), n.nodePID, n.successor.name, n.successor.nodeID.Text(16), n.predecessor.name, n.predecessor.nodeID.Text(16))
 	fmt.Println("==========================")
 }
 
@@ -505,7 +537,7 @@ func (n *Node) startTransfer(message *StartTransfer, context actor.Context) {
 
 	response.Status = Status_OK
 	context.Respond(response)
-	fmt.Println("[DEBUG]: The transfer message PID is: ", newFileTransfer.fileName)
+	fmt.Println("[DEBUG]: The transfer message PID is: ", newFileTransfer.peerPID)
 	fmt.Printf("[SYSTEM]: File Transfer request initialized by Address: %v ID:%v \n", context.Sender().Address, context.Sender().Id)
 }
 
@@ -577,10 +609,13 @@ func (n *Node) handleFileChunk(message *FileChunk, context actor.Context) {
 		}
 
 		delete(n.incomingFileTransfers, message.GetFilename())
-		deleteDB(message.GetFilename())
+		//deleteDB(message.GetFilename())
 		fmt.Printf("[SYSTEM] File Transfer finished successfully from Address: %v ID:%v\n", context.Sender().Address, context.Sender().Id)
 		fmt.Println("Sending EndTransfer to: ", instance.peerPID)
 		context.Send(instance.peerPID, &EndTransfer{})
+		if len(n.incomingFileTransfers) == 0 {
+			n.ongoingTransfer = false
+		}
 		return
 	}
 
@@ -701,4 +736,12 @@ func checkError(e error) {
 	if e != nil {
 		panic(e)
 	}
+}
+
+func (n *Node) checkRowsPresent(rows []int) bool {
+	if len(rows) != 0 {
+		n.ongoingTransfer = true
+		return true
+	}
+	return false
 }

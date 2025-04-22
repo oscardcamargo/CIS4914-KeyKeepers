@@ -6,10 +6,10 @@ import (
 	"fmt"
 	_ "github.com/mattn/go-sqlite3"
 	"log"
+	"math/big"
 	"os"
 	"sort"
 	"time"
-	"math/big"
 )
 
 var DB_PATH = "../malware_hashes.db"
@@ -19,7 +19,6 @@ var TABLE_NAME = "malware_hashes"
 var db *sql.DB
 var databaseLines []Range // Used to track which lines this node has in its database.
 
-
 type Range struct {
 	start int
 	end   int
@@ -27,7 +26,7 @@ type Range struct {
 
 type BigRange struct {
 	start string
-	end string
+	end   string
 }
 
 var CREATE_TABLE_STATEMENT = `CREATE TABLE "malware_hashes" (
@@ -61,8 +60,7 @@ var CREATE_TABLE_STATEMENT = `CREATE TABLE "malware_hashes" (
     "alt_name13" TEXT
 );`
 
-
-//TODO: implement a way for the first node to get the full db and subsequent nodes to create empty dbs
+// TODO: implement a way for the first node to get the full db and subsequent nodes to create empty dbs
 // configuration flag argument?
 func dbInit() {
 	var err error
@@ -83,7 +81,7 @@ func dbInit() {
 			log.Fatal("[DATABASE] Failed to create database table on init:", err)
 		}
 	}
-	
+
 	err = db.Ping()
 	if err != nil {
 		log.Fatal("[DATABASE] Failed to connect to local sqlite database:", err)
@@ -91,12 +89,11 @@ func dbInit() {
 		fmt.Println("Successfully connected to local sqlite database.")
 	}
 
-
 	//create the indices
 	indexString := fmt.Sprintf(`CREATE UNIQUE INDEX "index_sha1" ON "%v" ("sha1_hash" ASC);`, TABLE_NAME)
 	_, err = db.Exec(indexString)
 	if err != nil {
-		log.Fatal("[DATABASE] Failed to create and index on the sha1_hash column.")
+		log.Fatal("[DATABASE] Failed to create an index on the sha1_hash column: ", err)
 	} else {
 		fmt.Println("Successfully created the sha1_hash index.")
 	}
@@ -186,11 +183,11 @@ func exportDatabaseLines(lineSlice []Range) (string, error) {
 			return "", errors.New("error: Initiated transfer for line(s) that aren't in the database")
 		}
 	}
-	
+
 	//Create a filename unique to this node so that nodes can differentiate between other received files.
 	hostname, _ := os.Hostname()
 	pid := os.Getpid()
-	newDBFileName := fmt.Sprintf("data_set_segment_%s_%d_%d.db", hostname, pid, time.Now().Unix())
+	newDBFileName := fmt.Sprintf("data_set_segment_%s_%d_%d.db", hostname, pid, time.Now().UnixNano())
 
 	var err error
 	newDB, err := sql.Open("sqlite3", DB_FOLDER+newDBFileName)
@@ -231,7 +228,7 @@ func exportDatabaseLines(lineSlice []Range) (string, error) {
 	if err != nil {
 		log.Printf("[DATABASE] Error setting synchronous OFF: %v\n", err)
 	}
-	
+
 	_, err = newDB.Exec("PRAGMA journal_mode = MEMORY;")
 	if err != nil {
 		log.Printf("[DATABASE] Error setting journal_mode MEMORY: %v\n", err)
@@ -317,7 +314,7 @@ WHERE NOT EXISTS (
 
 // Deletes the range (from start to end) of database lines.
 // Returns bool indicating success.
-//maybe repurpose to work with 
+// maybe repurpose to work with
 func deleteDatabaseLines(delRange Range) bool {
 	deleteQuery := fmt.Sprintf("DELETE FROM %v WHERE ID >= ? AND ID <= ?", TABLE_NAME)
 
@@ -359,7 +356,6 @@ func deleteDatabaseLines(delRange Range) bool {
 
 	return true
 }
-
 
 func deleteOtherHashes(keepRange BigRange) bool {
 	var minHash, maxHash string
@@ -411,10 +407,8 @@ func deleteOtherHashes(keepRange BigRange) bool {
 			return false
 		}
 	} else {
-		return false;
+		return false
 	}
-
-	
 
 	// for index := 0; index < len(databaseLines); index++ {
 	// 	rng := databaseLines[index]
@@ -516,9 +510,9 @@ func getLineRange() []Range {
 	return databaseLines
 }
 
-//Used for getting the IDs of selected SHA1 hashes
+// Used for getting the IDs of selected SHA1 hashes
 func getRowsInHashRange(startHash, endHash string) ([]int, error) {
-	fmt.Printf("Attempting to send hashes %s - %s\n", startHash, endHash)
+	//fmt.Printf("Attempting to send hashes %s - %s\n", startHash, endHash)
 	query := fmt.Sprintf(`SELECT ID FROM %s WHERE sha1_hash >= ? AND sha1_hash <= ?`, TABLE_NAME)
 
 	rows, err := db.Query(query, startHash, endHash)
@@ -539,7 +533,7 @@ func getRowsInHashRange(startHash, endHash string) ([]int, error) {
 	return ids, nil
 }
 
-//Used for batching adjacent IDs based on selected SHA1 hashes
+// Used for batching adjacent IDs based on selected SHA1 hashes
 func batchIDs(ids []int) []Range {
 	if len(ids) == 0 {
 		return nil
