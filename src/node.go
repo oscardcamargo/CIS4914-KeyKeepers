@@ -83,6 +83,10 @@ func (n *Node) Receive(context actor.Context) {
 		n.handleFileChunk(message, context)
 	case *EndTransfer:
 		n.handleEndTransfer()
+	case *CheckHash:
+		n.checkHash(message, context)
+	default:
+		fmt.Printf("[SYSTEM] Received unknown message: %#v\n", message)
 	}
 }
 
@@ -744,4 +748,14 @@ func (n *Node) checkRowsPresent(rows []int) bool {
 		return true
 	}
 	return false
+  
+func (n *Node) checkHash(hashMsg *CheckHash, context actor.Context) {
+	hashResult, err := checkHash(hashMsg.Hash)
+	if err != nil {
+		// If the hash isn't found
+		//TODO This is where logic for checking the next node for a hash would be.
+		context.Respond(hashResult)
+	}
+
+	context.Respond(hashResult)
 }

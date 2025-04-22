@@ -132,10 +132,10 @@ func dbInit() {
 	databaseLines = append(databaseLines, Range{start: minID, end: maxID})
 }
 
-func checkHash(hash string) (string, error) {
-	var query = `SELECT file_name, file_type_guess, signature, vtpercent, first_seen_utc, reporter
+func checkHash(hash string) (*HashResult, error) {
+	var query = `SELECT * 
 	FROM malware_hashes
-	WHERE sha256_hash='` + hash + `';`
+	WHERE sha1_hash='` + hash + `';`
 
 	row, err := db.Query(query)
 	if err != nil {
@@ -149,24 +149,32 @@ func checkHash(hash string) (string, error) {
 		}
 	}(row)
 
-	var SQLResult string
+	var hashMsg = HashResult{ID: -1}
 	for row.Next() {
-		var fileName string
-		var fileType string
-		var signature string
-		var vtpercent string
-		var firstSeen string
-		var reporter string
-		if err := row.Scan(&fileName, &fileType, &signature, &vtpercent, &firstSeen, &reporter); err != nil {
+		var ID int
+		var first_seen_utc, sha256_hash, md5_hash, sha1_hash, reporter, fileName, file_type_guess, mime_type string
+		var signature, clamav, vtpercent, imphash, ssdeep, tlsh string
+		var alt_name1, alt_name2, alt_name3, alt_name4, alt_name5, alt_name6, alt_name7, alt_name8, alt_name9 string
+		var alt_name10, alt_name11, alt_name12, alt_name13 string
+
+		err := row.Scan(&ID, &first_seen_utc, &sha256_hash, &md5_hash, &sha1_hash, &reporter, &fileName,
+			&file_type_guess, &mime_type, &signature, &clamav, &vtpercent, &imphash, &ssdeep, &tlsh, &alt_name1,
+			&alt_name2, &alt_name3, &alt_name4, &alt_name5, &alt_name6, &alt_name7, &alt_name8,
+			&alt_name9, &alt_name10, &alt_name11, &alt_name12, &alt_name13)
+		if err != nil {
 			fmt.Printf("[DATABASE] Error scanning row: %v\n", err.Error())
-			return "", err
+			return &HashResult{ID: -1}, err
 		}
 
-		SQLResult = SQLResult + fmt.Sprintf("File Name: %s\nFile Type: %s\nSigning Authority: %s\nVirusTotal Percent: %s\nFirst Seen: %s\nReporter: %s\n",
-			fileName, fileType, signature, vtpercent, firstSeen, reporter)
+		hashMsg = HashResult{ID: int32(ID), FirstSeenUtc: first_seen_utc, Sha256Hash: sha256_hash, Md5Hash: md5_hash,
+			Sha1Hash: sha1_hash, Reporter: reporter, FileName: fileName, FileTypeGuess: file_type_guess,
+			MimeType: mime_type, Signature: signature, Clamav: clamav, Vtpercent: vtpercent, Imphash: imphash,
+			Ssdeep: ssdeep, Tlsh: tlsh, AltName1: alt_name1, AltName2: alt_name2, AltName3: alt_name3,
+			AltName4: alt_name4, AltName5: alt_name5, AltName6: alt_name6, AltName7: alt_name7, AltName8: alt_name8,
+			AltName9: alt_name9, AltName10: alt_name10}
 	}
 
-	return SQLResult, nil
+	return &hashMsg, nil
 }
 
 // Saves the range (from start to end) of database lines to a separate database to be transferred to another node.

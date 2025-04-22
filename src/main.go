@@ -105,10 +105,6 @@ func getSubnetIP(subnet string) string {
 }
 
 func main() {
-	// var testHash string = `163c47c4e45116fc184c41428ec0cbbd60d2bdacb8df759d6f744f252d6c1305`
-	// hashResult, err := checkHash(testHash)
-
-	// fmt.Println(hashResult)
 	var hostname string
 	var port int
 	// go run . <hostname> <port> <name> <remote_hostname> <remote_port> <remote_name>
@@ -184,7 +180,6 @@ func main() {
 		}
 
 		// Attempt to resolve hostname if the address is not an IP
-		_ = net.ParseIP(remote_hostname)
 		if net.ParseIP(remote_hostname) == nil {
 			ips, err := net.LookupIP(remote_hostname)
 			if err != nil {
