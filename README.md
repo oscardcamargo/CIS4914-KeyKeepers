@@ -39,8 +39,11 @@
 4. **Download the Database**
 
     - The original malware signature dataset is available at [MalwareBazaar](https://bazaar.abuse.ch).
-    - A modified and compatible version for this system is hosted [on Google Drive](https://drive.google.com/drive/folders/18VmFDWQL1ayjJoP8AZCehXTQowhdQHd4).
-    - **Download** the file `malware_hashes.db` and place it in the root project directory (`CIS4914-KeyKeepers`).
+    - Run ConvertMalwareBazaarDataset.py with the dataset in the same folder to convert it. 
+- Alternatively,
+  - A compatible version for this system is hosted [on Google Drive](https://drive.google.com/drive/folders/18VmFDWQL1ayjJoP8AZCehXTQowhdQHd4).
+  
+  - Place `malware_hashes.db` in /data
 
 5. **Enable CGO for SQLite Support (Windows Only)**
 
