@@ -494,7 +494,12 @@ func getRowsInHashRange(startHash, endHash string) ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Printf("[DATABASE] Error closing database rows: %v\n", err.Error())
+		}
+	}(rows)
 
 	var ids []int
 	for rows.Next() {

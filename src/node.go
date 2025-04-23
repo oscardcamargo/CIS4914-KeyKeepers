@@ -32,15 +32,14 @@ type Node struct {
 	predecessor     *NodeInfo
 	fingerTable     []*NodeInfo //list of actors at the predetermined locations on the ring
 
-	awaitingJoin                bool
-	awaitingStabilize           bool
-	awaitingFixFingers          bool
-	awaitingAcceptConnection    bool
-	awaitingChunkReceipt        bool
-	awaitingPredPredForTransfer bool
-	ongoingTransfer             bool
-	newPredecessor              bool
-	awaitingHashCheck           bool
+	awaitingJoin             bool
+	awaitingStabilize        bool
+	awaitingFixFingers       bool
+	awaitingAcceptConnection bool
+	awaitingChunkReceipt     bool
+	ongoingTransfer          bool
+	newPredecessor           bool
+	awaitingHashCheck        bool
 
 	// List of active requests for hashes that are awaiting responses sent by this node
 	activeHashChecks map[string]*activeHashCheck
