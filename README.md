@@ -108,6 +108,45 @@ go run . 127.0.0.1 8000 Node1
 go run . 127.0.0.1 8001 Node2 127.0.0.1 8000 Node1
 ```
 
+## 🔍 Querying a Node
+
+To query a node for a specific SHA-1 hash:
+
+```bash
+keykeeper.exe <Node IP> <Node Port> <Node Name> <hash>
+```
+
+### Parameters:
+
+| Argument       | Description                                  |
+|----------------|----------------------------------------------|
+| `<Node IP>`    | IP address of the node to query              |
+| `<Node Port>`  | Port number of the node to query             |
+| `<Node Name>`  | Identifier of the target node                |
+| `<hash>`       | SHA-1 hash of the file to look up            |
+
+### Example:
+
+```bash
+keykeeper.exe 127.0.0.1 8080 Node1 29812108115024db02ae79ac853743d31c606455
+```
+
+> This command queries `Node1` running on `127.0.0.1:8080` for a specific SHA-1 hash.
+
+---
+
+## 🐳 Running Nodes with Docker
+
+Nodes can also be deployed as Docker containers using the provided `Dockerfile`.
+
+To launch multiple nodes and a client for querying the swarm, refer to the example script:
+
+```bash
+StartDockerSwarm.bat
+```
+
+This script initializes a small Chord network using Docker and simulates client interaction.
+
 ## 📚 References
 
 [1] J. V. Estenssoro, "Malware and virus statistics 2024: The trends you need to know about," *AVG*, 2024. [Online]. Available: https://www.avg.com/en/signal/malware-statistics
