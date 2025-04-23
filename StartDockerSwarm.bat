@@ -1,8 +1,11 @@
 @echo off
 SETLOCAL ENABLEDELAYEDEXPANSION
 
+:: The sha1 hash that the client will ask the nodes for
+set hash=29812108115024db02ae79ac853743d31c606455
+
 :: Number of nodes that are launched.
-set NumberOfNodes=3
+set NumberOfNodes=6
 
 :: The port that the first node starts on. The next will be 8081, then 8082, etc.
 set startPort=8080
@@ -30,7 +33,7 @@ for /L %%i in (2,1,%NumberOfNodes%) do (
 :: Maybe pause here for a moment to allow containers to stabilize
 cd client
 docker build -t keykeeperclient .
-docker service create --name KeyKeeperClient --endpoint-mode dnsrr --network keykeeper-net keykeeperclient KeyKeeper-1 %startPort% node1 29812108115024db02ae79ac853743d31c606455 10.20.0.0/24
+docker service create --name KeyKeeperClient --endpoint-mode dnsrr --network keykeeper-net keykeeperclient KeyKeeper-1 %startPort% node1 %hash% 10.20.0.0/24
 
 echo[
 echo Check if the containers are running in Docker Desktop.
