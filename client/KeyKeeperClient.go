@@ -5,6 +5,7 @@ import (
 	"github.com/lmittmann/tint"
 	"net"
 	"os"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -26,9 +27,18 @@ func (state *ResponseActor) Receive(ctx actor.Context) {
 	case *HashRequest:
 		state.sendRequest(msg, ctx)
 	case *HashResult:
-		if msg.Sha1Hash == "" {
-			fmt.Println("File not found in malware database.")
-			os.Exit(1)
+		//fmt.Printf("Message from actor: %v\n", ctx.Sender())
+		if msg.ID == -1 {
+			fmt.Println("Response: Hash not found in malware database.")
+			os.Exit(0)
+		}
+		if msg.ID == -2 {
+			fmt.Println("Response: Connection timed in node network.")
+			os.Exit(0)
+		}
+		if msg.ID == -3 {
+			fmt.Println("found it.")
+			os.Exit(0)
 		}
 
 		fmt.Println("Hash found:")
@@ -91,16 +101,11 @@ func (state *ResponseActor) Receive(ctx actor.Context) {
 	default:
 		//fmt.Printf("Received unknown message: %#v\n", msg)
 	}
-
 }
 
 func handleArgs(arg1, arg2, arg3, arg4 string) (string, int, string, string) {
-	//fmt.Printf("arg1: %v\n", arg1)
-	//fmt.Printf("arg2: %v\n", arg2)
-	//fmt.Printf("arg3: %v\n", arg3)
-	//fmt.Printf("arg4: %v\n", arg4)
-
 	// IP address
+	// Attempt to resolve hostname if the address is not an IP
 	var remoteIP string
 	if net.ParseIP(arg1) == nil {
 		ips, err := net.LookupIP(arg1)
@@ -138,6 +143,62 @@ func handleArgs(arg1, arg2, arg3, arg4 string) (string, int, string, string) {
 	return remoteIP, port, nodeName, hash
 }
 
+// Returns the IP of a connection based on a specific subnet
+// Ex: "10.20.0.0/24" will return the IP address of a networking interface from the 10.20.0.x range.
+func getSubnetIP(subnet string) string {
+	_, ipnet, err := net.ParseCIDR(subnet)
+	if err != nil {
+		fmt.Printf("Invalid subnet: %v\n", err)
+		return ""
+	}
+
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		fmt.Println("[MAIN] Error getting network interfaces:", err)
+		return "localhost"
+	}
+
+	for _, iface := range interfaces {
+		/*
+			// This is to skip down or loopback interfaces, but maybe we want those?
+			// Maybe network interfaces come back up and loopback can connect to local nodes.
+				if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+					continue
+				}
+		*/
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			fmt.Println("[MAIN] Error getting interface addresses:", err)
+			continue
+		}
+
+		for _, addr := range addrs {
+			var ip net.IP
+
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+
+			// Only consider IPv4 addresses
+			if ip == nil || ip.To4() == nil {
+				continue
+			}
+
+			if ipnet.Contains(ip) {
+				fmt.Println("Using listening IP: ", ip.String())
+				return ip.String()
+			}
+		}
+	}
+
+	fmt.Printf("Could not find subnet %v, using localhost.", subnet)
+	return "localhost"
+}
+
 func printHelp() {
 	fmt.Println(`Usage: keykeeper.exe <Node IP> <Node Port> <Node Name> <hash>
 
@@ -165,12 +226,24 @@ func findAvailablePort(startPort, maxPort int) (int, error) {
 }
 
 func main() {
-	if len(os.Args) != 5 {
+	if !(len(os.Args) == 5 || len(os.Args) == 6) {
 		printHelp()
 		os.Exit(1)
 	}
 
 	remoteIP, remotePort, remoteName, sha1Hash := handleArgs(os.Args[1], os.Args[2], os.Args[3], os.Args[4])
+
+	thisIP := "0.0.0.0"
+	if len(os.Args) == 6 {
+		//if the IP is in the shape of xxx.xxx.xxx.xxx/xx choose an interface with the specific subnet
+		subnetRegex := regexp.MustCompile(`/\d{1,2}$`)
+		subnetMatch := subnetRegex.FindStringSubmatch(os.Args[5])
+		if subnetMatch != nil {
+			thisIP = getSubnetIP(os.Args[5])
+		} else {
+			thisIP = os.Args[5]
+		}
+	}
 
 	// Create new logger that only logs errors, so client isn't spammed.
 	logger := func(system *actor.ActorSystem) *slog.Logger {
@@ -188,12 +261,12 @@ func main() {
 
 	// NOTE: This doesn't open a TCP connection with the node.
 	// If this client is in a NAT network they won't get a response back if port forwarding isn't set up.
-	port, err := findAvailablePort(8000, 9000)
+	port, err := findAvailablePort(8090, 9000)
 	if err != nil {
 		println("[System] Error finding available port to listen for response:", err)
 		os.Exit(1)
 	}
-	config := remote.Configure("0.0.0.0", port)
+	config := remote.Configure(thisIP, port)
 	remoting := remote.NewRemote(system, config)
 	remoting.Start()
 
@@ -207,4 +280,5 @@ func main() {
 
 	// Keep the client alive long enough to receive the response
 	time.Sleep(30 * time.Second)
+	fmt.Println("No response from the node.")
 }

@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-var DB_PATH = "../malware_hashes.db"
-var DB_FOLDER = "../"
+var DB_PATH = "../data/malware_hashes.db"
+var DB_FOLDER = "../data"
 var TABLE_NAME = "malware_hashes"
 
 var db *sql.DB
@@ -60,15 +60,23 @@ var CREATE_TABLE_STATEMENT = `CREATE TABLE "malware_hashes" (
     "alt_name13" TEXT
 );`
 
-// TODO: implement a way for the first node to get the full db and subsequent nodes to create empty dbs
 // configuration flag argument?
 func dbInit() {
 	var err error
 
+	// Check if the data folder exists.
+	if _, err := os.Stat(DB_FOLDER); os.IsNotExist(err) {
+		// Create the folder if it doesn't exist
+		err = os.MkdirAll(DB_FOLDER, 0755) // 0755 is typical permission for folders
+		if err != nil {
+			log.Fatal("[DATABASE] Failed to create folder: ", err)
+		}
+	}
+
 	//Open SQLite database
 	db, err = sql.Open("sqlite3", DB_PATH)
 	if err != nil {
-		log.Fatal("[DATABASE] Failed to open database on init:", err)
+		log.Fatal("[DATABASE] Failed to open database on init: ", err)
 	}
 
 	// Check that the database exists
@@ -90,20 +98,16 @@ func dbInit() {
 	}
 
 	//create the indices
-	indexString := fmt.Sprintf(`CREATE UNIQUE INDEX "index_sha1" ON "%v" ("sha1_hash" ASC);`, TABLE_NAME)
+	indexString := fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS "index_sha1" ON "%v" ("sha1_hash" ASC);`, TABLE_NAME)
 	_, err = db.Exec(indexString)
 	if err != nil {
 		log.Fatal("[DATABASE] Failed to create an index on the sha1_hash column: ", err)
-	} else {
-		fmt.Println("Successfully created the sha1_hash index.")
 	}
 
-	indexString = fmt.Sprintf(`CREATE UNIQUE INDEX "index_ID" ON "%v" ("ID" ASC);`, TABLE_NAME)
+	indexString = fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS "index_ID" ON "%v" ("ID" ASC);`, TABLE_NAME)
 	_, err = db.Exec(indexString)
 	if err != nil {
 		log.Fatal("[DATABASE] Failed to create and index on the ID column.")
-	} else {
-		fmt.Println("Successfully created the ID index.")
 	}
 
 	getMax := fmt.Sprintf("SELECT MAX(ID) FROM %v", TABLE_NAME)
@@ -182,7 +186,6 @@ func checkHash(hash string) (*HashResult, error) {
 // Call deleteExportDB when finished using the returned database to free up space.
 func exportDatabaseLines(lineSlice []Range) (string, error) {
 	// Check to make sure the ranges are in the database
-	fmt.Println("In export...")
 	for _, rng := range lineSlice {
 		lineStart := rng.start
 		lineEnd := rng.end
@@ -267,8 +270,6 @@ func exportDatabaseLines(lineSlice []Range) (string, error) {
 		log.Printf("[DATABASE] Error detaching database: %v\n", err.Error())
 		return "", err
 	}
-
-	fmt.Println("Out export...")
 
 	return newDBFileName, nil
 }
@@ -378,10 +379,6 @@ func deleteOtherHashes(keepRange BigRange) bool {
 		return false
 	}
 
-	// minHashNum := new(big.Int)
-	// minHashNum.SetString(minHash, 16)
-	// maxHashNum := new(big.Int)
-	// maxHashNum.SetString(maxHash, 16)
 	startNum := new(big.Int)
 	startNum.SetString(keepRange.start, 16)
 	endNum := new(big.Int)
@@ -417,36 +414,6 @@ func deleteOtherHashes(keepRange BigRange) bool {
 	} else {
 		return false
 	}
-
-	// for index := 0; index < len(databaseLines); index++ {
-	// 	rng := databaseLines[index]
-
-	// 	// If delRange is fully within an existing range, split it into two
-	// 	if rng.start < delRange.start && rng.end > delRange.end {
-	// 		// Create a new range for the right-hand side
-	// 		newRange := Range{start: delRange.end + 1, end: rng.end}
-
-	// 		// Adjust the left-side range
-	// 		databaseLines[index].end = delRange.start - 1
-
-	// 		// Insert the new range after the adjusted left range
-	// 		databaseLines = append(databaseLines[:index+1], append([]Range{newRange}, databaseLines[index+1:]...)...)
-	// 	} else if rng.start >= delRange.start && rng.end <= delRange.end {
-	// 		// If it exactly matches or encompasses the range, remove the range
-	// 		databaseLines = append(databaseLines[:index], databaseLines[index+1:]...)
-	// 		index-- // Adjust the index after removal
-	// 	} else if rng.start < delRange.start &&
-	// 		rng.end <= delRange.end && rng.end >= delRange.start {
-	// 		// If the delete range extends past the right side, but still overlaps with the database range.
-	// 		// Trim right side
-	// 		databaseLines[index].end = delRange.start - 1
-	// 	} else if rng.start >= delRange.start && rng.start <= delRange.end &&
-	// 		rng.end > delRange.end {
-	// 		// If the delete range extends past the left side, but still overlaps with the database range.
-	// 		// Trim the left side
-	// 		databaseLines[index].start = delRange.end + 1
-	// 	}
-	// }
 
 	return true
 }
@@ -527,7 +494,12 @@ func getRowsInHashRange(startHash, endHash string) ([]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Printf("[DATABASE] Error closing database rows: %v\n", err.Error())
+		}
+	}(rows)
 
 	var ids []int
 	for rows.Next() {

@@ -140,14 +140,6 @@ func main() {
 	fmt.Println("This node's port: ", os.Args[2])
 	fmt.Println("This node's name: ", os.Args[3])
 
-	/*
-		if os.Args[3] != "node0" {
-			fmt.Println("using a diff db path")
-			DB_PATH = "../malware_hashes" + os.Args[3][4:] + ".db"
-		} else {
-			fmt.Println("using default db path")
-		}
-	*/
 	dbInit()
 
 	if len(os.Args) == 7 {
@@ -195,7 +187,6 @@ func main() {
 
 	//Send the initialization message with the data required to set up the node properties
 	system.Root.Send(node_pid, &Initialize{Name: node_pid.GetId(), Address: node_pid.GetAddress(), RemoteName: remote_name, RemoteAddress: remote_address})
-	//time.Sleep(2*time.Second)
 
 	//used to keep the application running
 	//TODO: make a more graceful way of keeping it up and shutting it down
