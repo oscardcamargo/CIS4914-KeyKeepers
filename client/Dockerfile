@@ -3,9 +3,10 @@ FROM golang:1.23
 ENV CGO_ENABLED=1
 WORKDIR /usr/src/app/src
 
-COPY src/go.mod src/go.sum ./
-COPY src/ ./
-#COPY data/malware_hashes.db ../
+COPY ./go.mod ./go.sum ./
+COPY KeyKeeperClient.go/ ./
+COPY message.pb.go/ ./
+COPY message.proto/ ./
 EXPOSE 8080-8100
 RUN go mod download && go mod verify
 

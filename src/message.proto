@@ -43,6 +43,7 @@ enum ResponseFor {
   FIX_FINGERS = 3;
   START_TRANSFER = 4;
   CHUNK_RECEIPT = 5;
+  HASH_CHECK = 6;
 }
 
 message Response {
@@ -51,7 +52,7 @@ message Response {
     string nodeID = 3;
     ResponseFor responseFor = 4;
     Status status = 5;
-    string message = 6; // Used for communicating error messages
+    string message = 6; // Used for communicating error messages or extra info
 }
 
 message InfoCommand {}
@@ -67,6 +68,8 @@ message StartTransfer {
   string filename = 1;
   repeated ProtoRange ranges = 2;
 }
+
+message EndTransfer {}
 
 message FileChunk {
   string filename = 1;
@@ -114,4 +117,5 @@ message HashResult {
   string alt_name11 = 26;
   string alt_name12 = 27;
   string alt_name13 = 28;
+  string originalHash = 29;
 }

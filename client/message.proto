@@ -43,6 +43,7 @@ message HashResult {
   string alt_name11 = 26;
   string alt_name12 = 27;
   string alt_name13 = 28;
+  string originalHash = 29;
 }
 
 message hashRequest {

@@ -3,8 +3,6 @@ package main
 import (
 	"crypto/sha1"
 	"database/sql"
-
-	//"encoding/binary"
 	"fmt"
 	"github.com/asynkron/protoactor-go/actor"
 	"io"
@@ -42,6 +40,10 @@ type Node struct {
 	awaitingPredPredForTransfer bool
 	ongoingTransfer             bool
 	newPredecessor              bool
+	awaitingHashCheck           bool
+
+	// List of active requests for hashes that are awaiting responses sent by this node
+	activeHashChecks map[string]*activeHashCheck
 
 	//lists of active file transfers. Tracked by file name
 	incomingFileTransfers map[string]*transfer
@@ -55,6 +57,13 @@ type transfer struct {
 	localFile        *os.File // Can be read or write depending on transfer direction
 	lastTransferTime time.Time
 	retryCount       int // Only used by Outgoing transfers
+}
+
+// Keeps track of requests for hashes sent to other nodes.
+type activeHashCheck struct {
+	sender           *actor.PID
+	hashCheckMessage *CheckHash
+	timeSent         time.Time
 }
 
 func (n *Node) Receive(context actor.Context) {
@@ -85,6 +94,9 @@ func (n *Node) Receive(context actor.Context) {
 		n.handleEndTransfer()
 	case *CheckHash:
 		n.checkHash(message, context)
+	case *HashResult:
+		n.forwardHashResult(message, context)
+	case *actor.Started:
 	default:
 		fmt.Printf("[SYSTEM] Received unknown message: %#v\n", message)
 	}
@@ -104,6 +116,7 @@ func (n *Node) handleInitialize(parameters *Initialize, context actor.Context) {
 	n.newPredecessor = false
 	n.incomingFileTransfers = make(map[string]*transfer)
 	n.outgoingFileTransfers = make(map[string]*transfer)
+	n.activeHashChecks = make(map[string]*activeHashCheck)
 
 	//check if first node and do the appropriate stuff
 	if parameters.GetRemoteAddress() == "" && parameters.GetRemoteName() == "" {
@@ -209,9 +222,6 @@ func (n *Node) handleResponse(context actor.Context) {
 				P: this node's predecessor's ID
 				S: this node's successor's ID
 			*/
-			//fmt.Printf("This node ID (N): %v\n", n.nodeID.Text(16))
-			//fmt.Printf("Pred node ID (P): %v\n", n.predecessor)
-			//fmt.Printf("Succ node ID (S): %v\n", n.successor)
 			N := big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16) // this is really N + 1
 			P := n.predecessor.nodeID.Text(16)
 			S := n.successor.nodeID.Text(16)
@@ -310,28 +320,33 @@ func (n *Node) handleResponse(context actor.Context) {
 					}
 				}
 			}
-
-			// TODO: This seems kind of important to have uncommented.
-			//deleteHashes(BigRange{start: big.NewInt(0).Add(n.nodeID, big.NewInt(1)).Text(16), end: n.successor.nodeID.Text(16)})
 		}
 		n.awaitingStabilize = false
-	} /*else if n.awaitingPredPredForTransfer {
-		rows, err := getRowsInHashRange(responseNodeInfo.nodeID.Text(16), n.predecessor.nodeID.Text(16))
-		if err != nil {
-			panic(err)
-		}
-		batch := batchIDs(rows)
-		predPID := actor.NewPID(n.predecessor.address, n.predecessor.name)
-		n.startDatabaseTransfer(predPID, context, batch)
-		fmt.Println("Transferred DB LINES TO PRED!!!!!!")
-		n.awaitingPredPredForTransfer = false
-	}*/
+	}
 
 	if n.awaitingFixFingers && response.ResponseFor == ResponseFor_FIX_FINGERS {
 		n.fingerTable[n.nextFingerIndex] = responseNodeInfo
 
 		//fmt.Printf("[FIX_FINGERS]: Fixed finger[%d]\n", n.nextFingerIndex)
 		n.awaitingFixFingers = false
+	}
+
+	if n.awaitingHashCheck && response.ResponseFor == ResponseFor_HASH_CHECK {
+		// If the answer is this node, set awaiting hash to false, respond to asker that the hash isn't found.
+		activeHashChk, exists := n.activeHashChecks[response.Message]
+		if !exists {
+			return
+		}
+
+		if response.NodeID == n.nodeID.Text(16) {
+			n.awaitingHashCheck = false
+			// .Message should contain the original hash.
+			//activeHashChk.hashCheckContext.Respond(&HashResult{ID: -1, OriginalHash: response.Message})
+			context.Send(activeHashChk.sender, &HashResult{ID: -1, OriginalHash: response.Message})
+		} else {
+			// If the answer is a different node, send a message asking for hash.
+			context.Request(actor.NewPID(responseNodeInfo.address, responseNodeInfo.name), activeHashChk.hashCheckMessage)
+		}
 	}
 
 	// Handle the confirmation of a transfer start or a chunk confirmation.
@@ -367,6 +382,7 @@ func (n *Node) handleResponse(context actor.Context) {
 
 	n.cleanUpTimedOutTransfers(n.incomingFileTransfers)
 	n.cleanUpTimedOutTransfers(n.outgoingFileTransfers)
+	n.cleanUpTimedOutHashCheck(context)
 }
 
 func (n *Node) join(toJoin *actor.PID, context actor.Context) {
@@ -409,6 +425,10 @@ func (n *Node) find_successor(message *RequestSuccessor, context actor.Context) 
 	if n.successor == nil { // If there is no successor none of the following functions can work.
 		return
 	}
+	response := &Response{}
+	if message.ResponseFor == ResponseFor_HASH_CHECK {
+		response.Message = message.NodeID
+	}
 
 	id := new(big.Int)
 	id.SetString(message.GetNodeID(), 16)
@@ -416,19 +436,17 @@ func (n *Node) find_successor(message *RequestSuccessor, context actor.Context) 
 	succBound := new(big.Int).Add(n.successor.nodeID, big.NewInt(1))
 
 	if n.name == n.successor.name {
-		context.Respond(&Response{
-			Name:        n.successor.name,
-			Address:     n.successor.address,
-			NodeID:      n.successor.nodeID.Text(16),
-			ResponseFor: message.ResponseFor,
-		})
+		response.Name = n.successor.name
+		response.Address = n.successor.address
+		response.NodeID = n.successor.nodeID.Text(16)
+		response.ResponseFor = message.ResponseFor
+		context.Respond(response)
 	} else if isBetween(id, n.nodeID, succBound) {
-		context.Respond(&Response{
-			Name:        n.successor.name,
-			Address:     n.successor.address,
-			NodeID:      n.successor.nodeID.Text(16),
-			ResponseFor: message.ResponseFor,
-		})
+		response.Name = n.successor.name
+		response.Address = n.successor.address
+		response.NodeID = n.successor.nodeID.Text(16)
+		response.ResponseFor = message.ResponseFor
+		context.Respond(response)
 	} else {
 		u := n.closest_preceeding_node(id)
 		context.Forward(u)
@@ -729,8 +747,18 @@ func (n *Node) cleanUpTimedOutTransfers(transfers map[string]*transfer) {
 	}
 }
 
+func (n *Node) cleanUpTimedOutHashCheck(context actor.Context) {
+	for hash, hashCheck := range n.activeHashChecks {
+		if time.Since(hashCheck.timeSent) > time.Second*29 {
+			delete(n.activeHashChecks, hash)
+			context.Send(hashCheck.sender, &HashResult{ID: -2, OriginalHash: hash})
+			//hashCheck.hashCheckContext.Respond(&HashResult{ID: -2, OriginalHash: hash})
+			fmt.Printf("[SYSTEM]: Hash Check for %v has timed out. No response.\n", hash)
+		}
+	}
+}
+
 func (n *Node) handleEndTransfer() {
-	fmt.Println("handleEndTransfer in da house!!!")
 	keepRange := BigRange{start: n.predecessor.nodeID.Text(16), end: n.nodeID.Text(16)}
 	deleteOtherHashes(keepRange)
 	n.ongoingTransfer = false
@@ -748,14 +776,41 @@ func (n *Node) checkRowsPresent(rows []int) bool {
 		return true
 	}
 	return false
-  
+
+}
 func (n *Node) checkHash(hashMsg *CheckHash, context actor.Context) {
+	fmt.Printf("[SYSTEM]: Checking hash check for client: %v", hashMsg.Hash)
 	hashResult, err := checkHash(hashMsg.Hash)
 	if err != nil {
-		// If the hash isn't found
-		//TODO This is where logic for checking the next node for a hash would be.
 		context.Respond(hashResult)
+		return
 	}
+	hashResult.OriginalHash = hashMsg.Hash
+	if hashResult.GetID() == -1 {
+		// If the hash isn't found
+		fmt.Println("Hash not found.")
+		successorMessage := &RequestSuccessor{
+			NodeID:      hashMsg.Hash,
+			ResponseFor: ResponseFor_HASH_CHECK}
+		n.awaitingHashCheck = true
+		hashCheckMsg := &activeHashCheck{sender: context.Sender(), hashCheckMessage: hashMsg, timeSent: time.Now()}
+		n.activeHashChecks[hashMsg.Hash] = hashCheckMsg
+		context.Request(n.nodePID, successorMessage) // Request own node for the correct node.
+		return
+	}
+	fmt.Printf("Found hash: %v\n", hashResult.GetSha1Hash())
 
 	context.Respond(hashResult)
+}
+
+func (n *Node) forwardHashResult(hashMsg *HashResult, context actor.Context) {
+	if !n.awaitingHashCheck {
+		return
+	}
+	activeHashChk, exists := n.activeHashChecks[hashMsg.OriginalHash]
+	if !exists {
+		return
+	}
+	n.awaitingHashCheck = false
+	context.Send(activeHashChk.sender, hashMsg)
 }
